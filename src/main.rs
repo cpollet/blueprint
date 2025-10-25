@@ -1,82 +1,16 @@
+mod parser;
+
 use std::fmt::{Display, Formatter, Write};
 use std::fs::File;
+use std::io;
 use std::io::Read;
 use std::path::Path;
-use std::{ io,};
 
 fn main() {
+    let shapes = parser::parse("examples/example.bp");
+
     let mut blueprint = Blueprint::default();
-
-    let mut shape = Shape::default();
-    let prev = shape.push(Edge {
-        a: Node::default(),
-        b: Node::default().add(0, 30),
-        attr: Attributes::default(),
-    });
-    let prev = shape.push(Edge {
-        a: prev,
-        b: prev.add(30, 0),
-        attr: Attributes::default(),
-    });
-    let prev = shape.push(Edge {
-        a: prev,
-        b: prev.add(0, -30),
-        attr: Attributes::default(),
-    });
-    let prev = shape.push(Edge {
-        a: prev,
-        b: prev.add(-10, 0),
-        attr: Attributes::default(),
-    });
-    let p1 = shape.push(Edge {
-        a: prev,
-        b: prev.add(-10, 0),
-        attr: Attributes::default(),
-    });
-    let prev = shape.push(Edge {
-        a: p1,
-        b: Node::default(),
-        attr: Attributes::default(),
-    });
-    blueprint.push(shape);
-
-    let mut shape = Shape::default();
-    let prev = shape.push(Edge {
-        a: p1.add(0, -10),
-        b: p1.add(-10, -10),
-        attr: Attributes::default(),
-    });
-    let _prev = shape.push(Edge {
-        a: prev,
-        b: prev.add(0, -30),
-        attr: Attributes::default(),
-    });
-    blueprint.push(shape);
-
-    let mut shape = Shape::default();
-
-    shape.push(Edge {
-        a: Node::new(0, 0),
-        b: Node::new(0, 0),
-        attr: Attributes::default(),
-    });
-    shape.push(Edge {
-        a: Node::default().add(4, 4),
-        b: Node::default().add(4, 4),
-        attr: Attributes::default().push(Attribute::Color(Color::Blue)),
-    });
-    shape.push(Edge {
-        a: Node::new(5, 5),
-        b: Node::new(5, 5),
-        attr: Attributes::default().push(Attribute::Color(Color::Red)),
-    });
-    shape.push(Edge {
-        a: Node::default(),
-        b: Node::default(),
-        attr: Attributes::default().push(Attribute::Color(Color::Yellow)),
-    });
-
-    blueprint.push(shape);
+    shapes.into_iter().for_each(|s| blueprint.push(s));
 
     blueprint.translate_to_origin();
     let blueprint = TryInto::<Blueprint<usize>>::try_into(blueprint).unwrap();
@@ -200,7 +134,7 @@ impl TryFrom<Blueprint<i32>> for Blueprint<usize> {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Eq, PartialEq, Hash)]
 struct Shape<T: Copy> {
     edges: Vec<Edge<T>>,
 }
@@ -240,6 +174,17 @@ impl Draw for Shape<usize> {
     }
 }
 
+impl From<Vec<Node<i32>>> for Shape<i32> {
+    fn from(value: Vec<Node<i32>>) -> Self {
+        let edges = value
+            .iter()
+            .zip(value.iter().skip(1))
+            .map(|(a, b)| Edge::new(a.point.x, a.point.y, b.point.x, b.point.y, Color::Red))
+            .collect::<Vec<_>>();
+        Self { edges }
+    }
+}
+
 impl TryFrom<Shape<i32>> for Shape<usize> {
     type Error = ();
 
@@ -254,7 +199,7 @@ impl TryFrom<Shape<i32>> for Shape<usize> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 struct Edge<T: Copy> {
     a: Node<T>,
     b: Node<T>,
@@ -329,7 +274,7 @@ impl Draw for Edge<usize> {
             .attributes
             .iter()
             .map(|a| match a {
-                Attribute::Color(c) => c
+                Attribute::Color(c) => c,
             })
             .next()
             .copied()
@@ -380,7 +325,7 @@ impl TryFrom<Edge<i32>> for Edge<usize> {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Eq, PartialEq, Hash)]
 struct Attributes {
     attributes: Vec<Attribute>,
 }
@@ -392,7 +337,7 @@ impl Attributes {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 enum Attribute {
     Color(Color),
 }
@@ -670,7 +615,7 @@ impl<'c> PpmImageReader<'c> {
 
 impl Read for PpmImageReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if buf.is_empty(){
+        if buf.is_empty() {
             return Ok(0);
         }
 
@@ -741,5 +686,12 @@ mod tests {
         assert_eq!(Edge::new(0, 0, 1, 0, Color::Black).len(), 1.0);
         assert_eq!(Edge::new(0, 0, 0, 1, Color::Black).len(), 1.0);
         assert!(Edge::new(0, 0, 1, 1, Color::Black).len() - 1.41 < 0.01);
+    }
+
+    #[test]
+    fn shape_from_nodes() {
+        let shape = Shape::from(vec![Node::new(0, 0), Node::new(0, 1), Node::new(1, 1)]);
+
+        assert_eq!(shape.edges.len(), 2);
     }
 }

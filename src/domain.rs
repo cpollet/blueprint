@@ -1,4 +1,5 @@
 use crate::{Canvas, Color};
+use std::slice::Iter;
 
 pub trait Bound<T> {
     fn boundaries(self) -> (Point<T>, Point<T>);
@@ -50,7 +51,7 @@ where
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Blueprint<T: Copy> {
     shapes: Vec<Shape<T>>,
 }
@@ -58,6 +59,10 @@ pub struct Blueprint<T: Copy> {
 impl<T: Copy> Blueprint<T> {
     pub fn push(&mut self, shape: Shape<T>) {
         self.shapes.push(shape);
+    }
+
+    pub fn shapes_iter(&self) -> Iter<'_, Shape<T>> {
+        self.shapes.iter()
     }
 }
 
@@ -108,9 +113,15 @@ impl TryFrom<Blueprint<i32>> for Blueprint<usize> {
     }
 }
 
-#[derive(Default, Debug, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct Shape<T: Copy> {
     edges: Vec<Edge<T>>,
+}
+
+impl<T: Copy> Shape<T> {
+    pub fn edges_iter(&self) -> Iter<'_, Edge<T>> {
+        self.edges.iter()
+    }
 }
 
 impl Bound<i32> for &Shape<i32> {
@@ -172,11 +183,26 @@ impl TryFrom<Shape<i32>> for Shape<usize> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct Edge<T: Copy> {
-    from: Point<T>,
-    to: Point<T>,
+    pub from: Point<T>,
+    pub to: Point<T>,
     attr: Attributes,
+}
+
+impl<T: Copy> Edge<T> {
+    pub fn color(&self) -> Color {
+        self.attr
+            .attributes
+            .iter()
+            .map(|a| match a {
+                Attribute::Color(c) => c,
+            })
+            .next()
+            .copied()
+            .unwrap_or(Color::Black)
+    }
 }
 
 impl Edge<i32> {
@@ -236,18 +262,9 @@ impl Translate for Edge<i32> {
 
 impl Draw for Edge<usize> {
     fn draw(&self, canvas: &mut Canvas) {
-        let color = self
-            .attr
-            .attributes
-            .iter()
-            .map(|a| match a {
-                Attribute::Color(c) => c,
-            })
-            .next()
-            .copied()
-            .unwrap_or(Color::Black);
+        let color = self.color();
 
-        if color.as_rgba().3 {
+        if color.as_rgba().3 == 0 {
             return;
         }
 
@@ -292,7 +309,7 @@ impl TryFrom<Edge<i32>> for Edge<usize> {
     }
 }
 
-#[derive(Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Default, Debug, Clone, Eq, PartialEq, Hash)]
 struct Attributes {
     attributes: Vec<Attribute>,
 }
@@ -304,7 +321,7 @@ impl Attributes {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum Attribute {
     Color(Color),
 }

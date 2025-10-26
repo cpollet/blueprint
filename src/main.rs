@@ -1,6 +1,7 @@
 mod domain;
 mod parser;
 mod ppm;
+mod ui;
 
 use crate::domain::{Blueprint, Bound, Draw, Edge, Point, Shape};
 use crate::ppm::PpmImage;
@@ -94,6 +95,12 @@ fn main() {
         blueprint.push(Shape::from(edges))
     }
 
+    blueprint.translate_to_origin();
+    {
+        let blueprint = Blueprint::<usize>::try_from(blueprint.clone()).unwrap();
+        ui::show(blueprint).expect("can launch UI");
+    }
+
     let canvas = Canvas::try_from(blueprint)
         .expect("Failed to convert blueprint")
         .pad(50, 50);
@@ -135,17 +142,21 @@ enum Color {
 impl Color {
     fn as_rgba(&self) -> RgbaColor {
         match self {
-            Color::Transparent => (0, 0, 0, true),
-            Color::White => (255, 255, 255, false),
-            Color::Black => (0, 0, 0, false),
-            Color::Red => (255, 0, 0, false),
-            Color::Green => (0, 255, 0, false),
-            Color::Blue => (0, 0, 255, false),
-            Color::Yellow => (255, 255, 0, false),
-            Color::Magenta => (255, 0, 255, false),
-            Color::Cyan => (0, 255, 255, false),
+            Color::Transparent => (0, 0, 0, 0),
+            Color::White => (255, 255, 255, 255),
+            Color::Black => (0, 0, 0, 255),
+            Color::Red => (255, 0, 0, 255),
+            Color::Green => (0, 255, 0, 255),
+            Color::Blue => (0, 0, 255, 255),
+            Color::Yellow => (255, 255, 0, 255),
+            Color::Magenta => (255, 0, 255, 255),
+            Color::Cyan => (0, 255, 255, 255),
             Color::Custom(c) => *c,
         }
+    }
+
+    pub fn is_transparent(&self) -> bool {
+        matches!(self, Color::Transparent)
     }
 }
 
@@ -192,7 +203,7 @@ impl TryFrom<Blueprint<i32>> for Canvas {
 }
 
 /// g, b, b, alpha (true=transparent)
-type RgbaColor = (u8, u8, u8, bool);
+type RgbaColor = (u8, u8, u8, u8);
 
 impl Canvas {
     fn new(width: usize, height: usize) -> Self {

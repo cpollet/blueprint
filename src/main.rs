@@ -1,16 +1,82 @@
 mod parser;
 
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Write};
 use std::fs::File;
-use std::io;
 use std::io::Read;
 use std::path::Path;
+use std::process::exit;
+use std::{fs, io};
 
 fn main() {
-    let shapes = parser::parse("examples/example.bp");
+    let src = fs::read_to_string("examples/example.bp").expect("Failed to read file");
+    let shapes = parser::parse(src.as_str(), "examples/example.bp");
 
     let mut blueprint = Blueprint::default();
-    shapes.into_iter().for_each(|s| blueprint.push(s));
+    let mut points = HashMap::new();
+
+    for edge_starts in shapes {
+        if edge_starts.is_empty() {
+            continue;
+        }
+        let mut nodes = Vec::with_capacity(edge_starts.len());
+        let mut edges = Vec::with_capacity(edge_starts.len() - 1);
+
+        let (node, tag) = match edge_starts[0].coord {
+            Coord::Absolute(x, y, tag) => (Node::new(x, y), tag),
+            Coord::Relative(x, y, tag) => (Node::new(x, y), tag),
+            Coord::Reference(tag) => (
+                *points.get(tag).unwrap_or_else(|| {
+                    eprintln!("#{tag} not found",);
+                    exit(1);
+                }),
+                None,
+            ),
+        };
+        if let Some(tag) = tag {
+            println!("#{tag} at {:?}", node.point);
+            points.insert(tag, node);
+        }
+        nodes.push(node);
+
+        for edge_start in edge_starts.into_iter().skip(1) {
+            let (node, tag) = match edge_start.coord {
+                Coord::Absolute(x, y, tag) => (Node::new(x, y), tag),
+                Coord::Relative(x, y, tag) => (nodes.last().expect("it exists").add(x, y), tag),
+                Coord::Reference(tag) => (
+                    *points.get(tag).unwrap_or_else(|| {
+                        eprintln!("#{tag} not found",);
+                        exit(1);
+                    }),
+                    None,
+                ),
+            };
+
+            let color = edge_start
+                .attributes
+                .get("color")
+                .map(|s| Color::try_from(*s))
+                .map(|c| c.unwrap_or_default())
+                .unwrap_or_default();
+
+            let prev_node = nodes.last().expect("it exists");
+
+            edges.push(Edge::new(
+                prev_node.point.x,
+                prev_node.point.y,
+                node.point.x,
+                node.point.y,
+                color,
+            ));
+
+            if let Some(tag) = tag {
+                println!("#{tag} at {:?}", node.point);
+                points.insert(tag, node);
+            }
+            nodes.push(node);
+        }
+        blueprint.push(Shape::from(edges))
+    }
 
     blueprint.translate_to_origin();
     let blueprint = TryInto::<Blueprint<usize>>::try_into(blueprint).unwrap();
@@ -134,7 +200,7 @@ impl TryFrom<Blueprint<i32>> for Blueprint<usize> {
     }
 }
 
-#[derive(Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Default, Debug, Eq, PartialEq)]
 struct Shape<T: Copy> {
     edges: Vec<Edge<T>>,
 }
@@ -182,6 +248,12 @@ impl From<Vec<Node<i32>>> for Shape<i32> {
             .map(|(a, b)| Edge::new(a.point.x, a.point.y, b.point.x, b.point.y, Color::Red))
             .collect::<Vec<_>>();
         Self { edges }
+    }
+}
+
+impl From<Vec<Edge<i32>>> for Shape<i32> {
+    fn from(value: Vec<Edge<i32>>) -> Self {
+        Self { edges: value }
     }
 }
 
@@ -364,6 +436,19 @@ impl Node<i32> {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Hash)]
+enum Coord<'s> {
+    Absolute(i32, i32, Option<&'s str>),
+    Relative(i32, i32, Option<&'s str>),
+    Reference(&'s str),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct EdgeStart<'s> {
+    coord: Coord<'s>,
+    attributes: HashMap<&'s str, &'s str>,
+}
+
 impl Translate for Node<i32> {
     fn translate(&mut self, dx: i32, dy: i32) {
         self.point.translate(dx, dy);
@@ -473,11 +558,12 @@ impl TryFrom<Point<i32>> for Point<usize> {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Hash)]
 #[allow(unused)]
 enum Color {
     Transparent,
     White,
+    #[default]
     Black,
     Red,
     Green,
@@ -501,6 +587,25 @@ impl Color {
             Color::Magenta => (255, 0, 255, false),
             Color::Cyan => (0, 255, 255, false),
             Color::Custom(c) => *c,
+        }
+    }
+}
+
+impl TryFrom<&str> for Color {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "transparent" => Ok(Color::Transparent),
+            "white" => Ok(Color::White),
+            "black" => Ok(Color::Black),
+            "red" => Ok(Color::Red),
+            "green" => Ok(Color::Green),
+            "blue" => Ok(Color::Blue),
+            "yellow" => Ok(Color::Yellow),
+            "magenta" => Ok(Color::Magenta),
+            "cyan" => Ok(Color::Cyan),
+            _ => Err(()),
         }
     }
 }

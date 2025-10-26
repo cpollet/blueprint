@@ -1,0 +1,41 @@
+// Comments are marked with // and expand to end of line
+
+// A shape is inside a `shape { ... }` block. A shape is defined as a list of
+// point, each point is connected to the previous one (except for the first one
+// who does not have any previous).
+//
+// Points can be defined in 3 different ways:
+//  - absolute (from top-left corner of the blueprint) with `@x,y` (x and y may
+//    be negative)
+//  - relative from previous point with `x,y` (x and y may be negative)
+//  - reference to a previously tagged point with @#tag
+// After being defined, points can have a tag attached to them, with `#tag`
+//
+// Edges are automatically drawn between two consecutive points and edge can be
+// configured with attributes inside `[...]`. The following attributes exists:
+//  - `color` which defines the edge color and can take the following values:
+//      * `transparent`
+//      * `white`
+//      * `black`
+//      * `red`
+//      * `green`
+//      * `blue`
+//      * `yellow`
+//      * `magenta`
+//      * `cyan`
+
+// The following draws a square with a diagonal from top-right to bottom left
+// corner
+shape {
+  @0,0
+  [color:blue]
+  5,0 #top-right
+  [color:red]
+  0,5
+  [color:green]
+  -5,0 #bottom-left
+  [color:cyan]
+  @0,0
+  [color:transparent]
+  @#top-right @#bottom-left
+}

@@ -6,11 +6,18 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::process::exit;
-use std::{fs, io};
+use std::{env, fs, io};
 
 fn main() {
-    let src = fs::read_to_string("examples/example.bp").expect("Failed to read file");
-    let shapes = parser::parse(src.as_str(), "examples/example.bp");
+    let args: Vec<String> = env::args().collect();
+    let in_filename = args.get(1).unwrap_or_else(|| {eprintln!("Usage: {} <filename>", args[0]);exit(1);});
+    let out_filename =format!("{}.ppm",in_filename.rsplit_once(".").unwrap_or_else(|| {
+        eprintln!("<filename> must end with .bp");
+        exit(1)
+    }).0);
+
+    let src = fs::read_to_string(in_filename).expect("Failed to read file");
+    let shapes = parser::parse(src.as_str(), in_filename);
 
     let mut blueprint = Blueprint::default();
     let mut points = HashMap::new();
@@ -96,7 +103,7 @@ fn main() {
     let canvas = canvas.pad(50, 50);
 
     PpmImage::from(&canvas)
-        .write_to_file("target/blueprint.ppm")
+        .write_to_file(&out_filename)
         .unwrap();
 }
 

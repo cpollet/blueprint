@@ -93,6 +93,8 @@ fn main() {
     let mut canvas = Canvas::new(width + 1, height + 1);
     blueprint.draw(&mut canvas);
 
+    let canvas = canvas.pad(50, 50);
+
     PpmImage::from(&canvas)
         .write_to_file("target/blueprint.ppm")
         .unwrap();
@@ -645,6 +647,18 @@ impl Canvas {
         debug_assert!(x < self.width, "get width: {} >= {}", x, self.width);
         debug_assert!(y < self.height, "get height: {} >= {}", y, self.height);
         self.pixels[x + y * self.width]
+    }
+
+    fn pad(&self, horizontal: usize, vertical: usize) -> Self {
+        let mut canvas = Canvas::new(self.width + 2 * horizontal, self.height + 2 * vertical);
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                canvas.set(x + horizontal, y + vertical, self.get(x, y));
+            }
+        }
+
+        canvas
     }
 }
 

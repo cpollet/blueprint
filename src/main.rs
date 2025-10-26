@@ -19,62 +19,68 @@ fn main() {
         if edge_starts.is_empty() {
             continue;
         }
-        let mut nodes = Vec::with_capacity(edge_starts.len());
+
+        let mut nodes: Vec<Node<i32>> = Vec::with_capacity(edge_starts.len());
         let mut edges = Vec::with_capacity(edge_starts.len() - 1);
 
-        let (node, tag) = match edge_starts[0].coord {
-            Coord::Absolute(x, y, tag) => (Node::new(x, y), tag),
-            Coord::Relative(x, y, tag) => (Node::new(x, y), tag),
-            Coord::Reference(tag) => (
-                *points.get(tag).unwrap_or_else(|| {
-                    eprintln!("#{tag} not found",);
-                    exit(1);
-                }),
-                None,
-            ),
-        };
-        if let Some(tag) = tag {
-            println!("#{tag} at {:?}", node.point);
-            points.insert(tag, node);
-        }
-        nodes.push(node);
-
-        for edge_start in edge_starts.into_iter().skip(1) {
-            let (node, tag) = match edge_start.coord {
-                Coord::Absolute(x, y, tag) => (Node::new(x, y), tag),
-                Coord::Relative(x, y, tag) => (nodes.last().expect("it exists").add(x, y), tag),
+        for ((from, attr), to) in edge_starts
+            .iter()
+            .map(|i| (&i.coord, &i.attributes))
+            .zip(edge_starts.iter().skip(1).map(|i| &i.coord))
+        {
+            let (from, tag) = match from {
+                Coord::Absolute(x, y, tag) => (Node::new(*x, *y), *tag),
+                Coord::Relative(x, y, tag) => (
+                    nodes
+                        .last()
+                        .copied()
+                        .map(|last| last.add(*x, *y))
+                        .unwrap_or(Node::new(*y, *x)),
+                    *tag,
+                ),
                 Coord::Reference(tag) => (
-                    *points.get(tag).unwrap_or_else(|| {
+                    *points.get(*tag).unwrap_or_else(|| {
                         eprintln!("#{tag} not found",);
                         exit(1);
                     }),
                     None,
                 ),
             };
+            nodes.push(from);
+            if let Some(tag) = tag {
+                println!("{} at {:?}", tag, from.point);
+                points.insert(tag, from);
+            }
 
-            let color = edge_start
-                .attributes
+            let to = match to {
+                Coord::Absolute(x, y, _) => Node::new(*x, *y),
+                Coord::Relative(x, y, _) => nodes
+                    .last()
+                    .copied()
+                    .map(|last: Node<i32>| last.add(*x, *y))
+                    .unwrap_or(Node::new(*y, *x)),
+
+                Coord::Reference(tag) => *points.get(tag).unwrap_or_else(|| {
+                    eprintln!("#{tag} not found",);
+                    exit(1);
+                }),
+            };
+
+            let color = attr
                 .get("color")
                 .map(|s| Color::try_from(*s))
                 .map(|c| c.unwrap_or_default())
                 .unwrap_or_default();
 
-            let prev_node = nodes.last().expect("it exists");
-
             edges.push(Edge::new(
-                prev_node.point.x,
-                prev_node.point.y,
-                node.point.x,
-                node.point.y,
+                from.point.x,
+                from.point.y,
+                to.point.x,
+                to.point.y,
                 color,
             ));
-
-            if let Some(tag) = tag {
-                println!("#{tag} at {:?}", node.point);
-                points.insert(tag, node);
-            }
-            nodes.push(node);
         }
+
         blueprint.push(Shape::from(edges))
     }
 
@@ -208,7 +214,7 @@ struct Shape<T: Copy> {
 impl<T: Copy> Shape<T> {
     fn push(&mut self, edge: Edge<T>) -> Node<T> {
         self.edges.push(edge);
-        self.edges.last().expect("we pushed it").b
+        self.edges.last().expect("we pushed it").to
     }
 }
 
@@ -273,31 +279,31 @@ impl TryFrom<Shape<i32>> for Shape<usize> {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 struct Edge<T: Copy> {
-    a: Node<T>,
-    b: Node<T>,
+    from: Node<T>,
+    to: Node<T>,
     attr: Attributes,
 }
 
 impl Edge<i32> {
     fn new(x1: i32, y1: i32, x2: i32, y2: i32, color: Color) -> Self {
         Self {
-            a: Node::new(x1, y1),
-            b: Node::new(x2, y2),
+            from: Node::new(x1, y1),
+            to: Node::new(x2, y2),
             attr: Attributes::default().push(Attribute::Color(color)),
         }
     }
 
     fn len(&self) -> f32 {
-        let dx = self.b.point.x.abs_diff(self.a.point.x) as f32;
-        let dy = self.b.point.y.abs_diff(self.a.point.y) as f32;
+        let dx = self.to.point.x.abs_diff(self.from.point.x) as f32;
+        let dy = self.to.point.y.abs_diff(self.from.point.y) as f32;
         f32::sqrt(dx * dx + dy * dy)
     }
 }
 
 impl Edge<usize> {
     fn len(&self) -> f32 {
-        let dx = self.b.point.x.abs_diff(self.a.point.x) as f32;
-        let dy = self.b.point.y.abs_diff(self.a.point.y) as f32;
+        let dx = self.to.point.x.abs_diff(self.from.point.x) as f32;
+        let dy = self.to.point.y.abs_diff(self.from.point.y) as f32;
         f32::sqrt(dx * dx + dy * dy)
     }
 }
@@ -306,12 +312,12 @@ impl Bound<i32> for &Edge<i32> {
     fn boundaries(self) -> (Point<i32>, Point<i32>) {
         (
             Point {
-                x: self.a.point.x.min(self.b.point.x),
-                y: self.a.point.y.min(self.b.point.y),
+                x: self.from.point.x.min(self.to.point.x),
+                y: self.from.point.y.min(self.to.point.y),
             },
             Point {
-                x: self.a.point.x.max(self.b.point.x),
-                y: self.a.point.y.max(self.b.point.y),
+                x: self.from.point.x.max(self.to.point.x),
+                y: self.from.point.y.max(self.to.point.y),
             },
         )
     }
@@ -321,12 +327,12 @@ impl Bound<usize> for &Edge<usize> {
     fn boundaries(self) -> (Point<usize>, Point<usize>) {
         (
             Point {
-                x: self.a.point.x.min(self.b.point.x),
-                y: self.a.point.y.min(self.b.point.y),
+                x: self.from.point.x.min(self.to.point.x),
+                y: self.from.point.y.min(self.to.point.y),
             },
             Point {
-                x: self.a.point.x.max(self.b.point.x),
-                y: self.a.point.y.max(self.b.point.y),
+                x: self.from.point.x.max(self.to.point.x),
+                y: self.from.point.y.max(self.to.point.y),
             },
         )
     }
@@ -334,8 +340,8 @@ impl Bound<usize> for &Edge<usize> {
 
 impl Translate for Edge<i32> {
     fn translate(&mut self, dx: i32, dy: i32) {
-        self.a.translate(dx, dy);
-        self.b.translate(dx, dy);
+        self.from.translate(dx, dy);
+        self.to.translate(dx, dy);
     }
 }
 
@@ -356,13 +362,13 @@ impl Draw for Edge<usize> {
             return;
         }
 
-        let dx = self.b.point.x as i32 - self.a.point.x as i32;
-        let dy = self.b.point.y as i32 - self.a.point.y as i32;
+        let dx = self.to.point.x as i32 - self.from.point.x as i32;
+        let dy = self.to.point.y as i32 - self.from.point.y as i32;
 
         if dx == 0 {
-            let start_y = self.a.point.y.min(self.b.point.y);
+            let start_y = self.from.point.y.min(self.to.point.y);
             for y in start_y..start_y + dy.unsigned_abs() as usize + 1 {
-                canvas.set(self.a.point.x, y, color)
+                canvas.set(self.from.point.x, y, color)
             }
             return;
         }
@@ -371,14 +377,14 @@ impl Draw for Edge<usize> {
 
         if dx > 0 {
             for step in 0..(dx + 1) as usize {
-                let x = self.a.point.x + step;
-                let y = (self.a.point.y as f32 + (step as f32 * slope)) as usize;
+                let x = self.from.point.x + step;
+                let y = (self.from.point.y as f32 + (step as f32 * slope)) as usize;
                 canvas.set(x, y, color)
             }
         } else {
             for x in 0..(dx.abs() + 1) as usize {
-                let y = (self.a.point.y as f32 - (x as f32 * slope)) as usize;
-                let x = self.a.point.x - x;
+                let y = (self.from.point.y as f32 - (x as f32 * slope)) as usize;
+                let x = self.from.point.x - x;
                 canvas.set(x, y, color)
             }
         }
@@ -390,8 +396,8 @@ impl TryFrom<Edge<i32>> for Edge<usize> {
 
     fn try_from(value: Edge<i32>) -> Result<Self, Self::Error> {
         Ok(Edge {
-            a: value.a.try_into()?,
-            b: value.b.try_into()?,
+            from: value.from.try_into()?,
+            to: value.to.try_into()?,
             attr: value.attr,
         })
     }
@@ -620,16 +626,6 @@ struct Canvas {
 type RgbaColor = (u8, u8, u8, bool);
 
 impl Canvas {
-    // const TRANSPARENT: Color = (0, 0, 0, true);
-    // const WHITE: Color = ;
-    // const BLACK: Color = (0, 0, 0, false);
-    // const RED: Color = (255, 0, 0, false);
-    // const GREEN: Color = (0, 255, 0, false);
-    // const BLUE: Color = (0, 0, 255, false);
-    // const YELLOW: Color = (255, 255, 0, false);
-    // const MAGENTA: Color = (255, 0, 255, false);
-    // const CYAN: Color = (0, 255, 255, false);
-
     fn new(width: usize, height: usize) -> Self {
         Self {
             width,

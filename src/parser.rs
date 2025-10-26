@@ -195,7 +195,6 @@ where
 
     just(Token::Shape)
         .ignore_then(nodes.delimited_by(just(Token::OpenCurly), just(Token::CloseCurly)))
-        // .map(Shape::from)
         .repeated()
         .collect::<Vec<Vec<_>>>()
 }

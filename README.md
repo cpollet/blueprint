@@ -9,7 +9,7 @@ $ blueprint examples/example.bp
 
 In order to convert the ppm files to png files, use
 ```bash
-$ pnmtopng examples/example..ppm > examples/example..png
+$ pnmtopng examples/example.ppm > examples/example.png
 ```
 
 # Resources

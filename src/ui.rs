@@ -3,10 +3,11 @@ use iced::mouse::Cursor;
 use iced::widget::canvas::{Geometry, Path, Stroke};
 use iced::widget::{MouseArea, canvas, column, container, row, text};
 use iced::{
-    Background, Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Subscription,
-    Task, Theme, Vector, border, event, keyboard, padding,
+    Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Size, Subscription, Task,
+    Theme, Vector, border, event, keyboard, padding,
 };
 use std::fmt::{Display, Formatter};
+use std::ops::Sub;
 
 pub fn show(blueprint: crate::Blueprint<usize>) -> iced::Result {
     iced::application(Blueprint::title, Blueprint::update, Blueprint::view)
@@ -37,6 +38,8 @@ impl Blueprint {
             blueprint: DrawableBlueprint {
                 blueprint: blueprint.clone(),
                 translation,
+                mouse_position: Default::default(),
+                fixed_position: None,
             },
             raw_blueprint: blueprint,
         }
@@ -72,6 +75,8 @@ impl Blueprint {
         self.blueprint = DrawableBlueprint {
             blueprint: self.raw_blueprint.scale(self.zoom_level.scale_factor()),
             translation: self.translation,
+            mouse_position: self.mouse_position,
+            fixed_position: self.fixed_position,
         };
     }
 
@@ -140,18 +145,10 @@ impl Blueprint {
                 .style(|_| container::Style::default()
                     .border(border::width(1).color(Color::from(crate::Color::Cyan))))
                 .padding(padding::bottom(5).top(5)),
-            container(image)
-                .style(|_| container::Style::default()
-                    .border(border::width(1).color(Color::from(crate::Color::Cyan)))
-                    .background(Background::Color(Color::from(crate::Color::White))))
-                // .style(|_| container::Style::default()
-                //     .border(border::width(1).color(Color::from(crate::Color::Cyan)))
-                //     .background(Background::Color(Color::from(crate::Color::Magenta))))
-                .width(Length::Fill)
-                .height(Length::Fill),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill);
+            container(image).style(|_| container::Style::default()
+                // .background(Background::Color(Color::from(crate::Color::Magenta)))
+                .border(border::width(1).color(Color::from(crate::Color::Cyan))))
+        ];
 
         container(rows)
             .padding(10)
@@ -187,6 +184,8 @@ enum Message {
 struct DrawableBlueprint {
     blueprint: crate::Blueprint<usize>,
     translation: Vector,
+    mouse_position: Point,
+    fixed_position: Option<Point>,
 }
 
 impl<Message> canvas::Program<Message> for DrawableBlueprint {
@@ -211,10 +210,19 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
 
                 let line = Path::line(edge.from.into(), edge.to.into());
 
-                let stroke = Stroke::default().with_color(edge.color().into());
-
-                frame.stroke(&line, stroke);
+                frame.stroke(&line, Stroke::default().with_color(edge.color().into()));
             }
+        }
+
+        if let Some(fixed_position) = self.fixed_position {
+            let top_left = fixed_position.sub(self.translation);
+            let bottom_right = self.mouse_position.sub(self.translation);
+            let size = Size::new(bottom_right.x - top_left.x, bottom_right.y - top_left.y);
+            let rect = Path::rectangle(top_left, size);
+            frame.stroke(
+                &rect,
+                Stroke::default().with_color(Color::new(1., 0., 1., 0.8)),
+            )
         }
 
         vec![frame.into_geometry()]

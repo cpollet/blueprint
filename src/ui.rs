@@ -7,7 +7,7 @@ use iced::{
     Theme, Vector, border, event, keyboard, padding,
 };
 use std::fmt::{Display, Formatter};
-use std::ops::Sub;
+use std::ops::{Add, Sub};
 
 pub fn show(blueprint: crate::Blueprint<usize>) -> iced::Result {
     iced::application(Blueprint::title, Blueprint::update, Blueprint::view)
@@ -21,10 +21,18 @@ pub fn show(blueprint: crate::Blueprint<usize>) -> iced::Result {
 struct Blueprint {
     zoom_level: ZoomLevel,
     translation: Vector,
+    fixed_translation: Option<Vector>,
     mouse_position: Point,
+    mouse_mode: MouseMode,
     fixed_position: Option<Point>,
-    blueprint: DrawableBlueprint,
     raw_blueprint: crate::Blueprint<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum MouseMode {
+    #[default]
+    Select,
+    Move,
 }
 
 impl Blueprint {
@@ -33,14 +41,10 @@ impl Blueprint {
         Self {
             zoom_level: ZoomLevel::default(),
             translation,
+            fixed_translation: None,
             mouse_position: Default::default(),
+            mouse_mode: Default::default(),
             fixed_position: None,
-            blueprint: DrawableBlueprint {
-                blueprint: blueprint.clone(),
-                translation,
-                mouse_position: Default::default(),
-                fixed_position: None,
-            },
             raw_blueprint: blueprint,
         }
     }
@@ -63,21 +67,32 @@ impl Blueprint {
             Message::TranslateLeft => self.translation.x -= 10.0,
             Message::TranslateDown => self.translation.y += 10.0,
             Message::TranslateRight => self.translation.x += 10.0,
-            Message::CursorMoved(point) => self.mouse_position = point,
+            Message::CursorMoved(point) => {
+                self.mouse_position = point;
+
+                if matches!(self.mouse_mode, MouseMode::Move)
+                    && let Some(fixed_translation) = self.fixed_translation
+                {
+                    self.translation = fixed_translation.add(Vector::new(
+                        self.mouse_position.x
+                            - self.fixed_position.unwrap_or(self.mouse_position).x,
+                        self.mouse_position.y
+                            - self.fixed_position.unwrap_or(self.mouse_position).y,
+                    ));
+                }
+            }
+            Message::ChangeMouseMode(mode) => {
+                self.mouse_mode = mode;
+            }
             Message::StorePosition => {
+                self.fixed_translation = Some(self.translation);
                 self.fixed_position = Some(self.mouse_position);
             }
             Message::DropPosition => {
+                self.fixed_translation = None;
                 self.fixed_position = None;
             }
         }
-
-        self.blueprint = DrawableBlueprint {
-            blueprint: self.raw_blueprint.scale(self.zoom_level.scale_factor()),
-            translation: self.translation,
-            mouse_position: self.mouse_position,
-            fixed_position: self.fixed_position,
-        };
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -106,6 +121,14 @@ impl Blueprint {
                 modifiers,
                 ..
             }) if modifiers.is_empty() => Some(Message::DropPosition),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::Control),
+                ..
+            }) => Some(Message::ChangeMouseMode(MouseMode::Move)),
+            Event::Keyboard(keyboard::Event::KeyReleased {
+                key: keyboard::Key::Named(Named::Control),
+                ..
+            }) => Some(Message::ChangeMouseMode(Default::default())),
             _ => None,
         })
     }
@@ -117,23 +140,33 @@ impl Blueprint {
             self.mouse_position.x.floor(),
             self.mouse_position.y.floor()
         ));
-        let delta = self.fixed_position.map(|position| {
-            let dx = ((self.mouse_position.x - position.x) / self.zoom_level.scale_factor())
-                .floor()
-                .abs();
-            let dy = ((self.mouse_position.y - position.y) / self.zoom_level.scale_factor())
-                .floor()
-                .abs();
-            text(format!("dx: {dx}, dy: {dy}; area: {}", dx * dy))
-        });
+        let delta = self
+            .fixed_position
+            .filter(|_| matches!(self.mouse_mode, MouseMode::Select))
+            .map(|position| {
+                let dx = ((self.mouse_position.x - position.x) / self.zoom_level.scale_factor())
+                    .floor()
+                    .abs();
+                let dy = ((self.mouse_position.y - position.y) / self.zoom_level.scale_factor())
+                    .floor()
+                    .abs();
+                text(format!("dx: {dx}, dy: {dy}; area: {}", dx * dy))
+            });
 
         let header = row![zoom_level, mouse_position]
             .push_maybe(delta)
             .spacing(20);
 
-        let image = canvas(&self.blueprint)
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let image = canvas(DrawableBlueprint {
+            blueprint: self.raw_blueprint.scale(self.zoom_level.scale_factor()),
+            translation: self.translation,
+            mouse_position: self.mouse_position,
+            fixed_position: self
+                .fixed_position
+                .filter(|_| matches!(self.mouse_mode, MouseMode::Select)),
+        })
+        .width(Length::Fill)
+        .height(Length::Fill);
 
         let image = MouseArea::new(image)
             .on_move(Message::CursorMoved)
@@ -172,6 +205,7 @@ enum Message {
     ZoomOut,
     ZoomReset,
     CursorMoved(Point),
+    ChangeMouseMode(MouseMode),
     StorePosition,
     DropPosition,
     TranslateUp,

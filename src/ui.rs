@@ -1,12 +1,12 @@
 use iced::keyboard::key::Named;
 use iced::mouse::Cursor;
 use iced::widget::canvas::{Geometry, Path, Stroke};
-use iced::widget::image::Handle;
 use iced::widget::{MouseArea, canvas, column, container, row, text};
 use iced::{
     Background, Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Subscription,
     Task, Theme, Vector, border, event, keyboard, padding,
 };
+use std::fmt::{Display, Formatter};
 
 pub fn show(blueprint: crate::Blueprint<usize>) -> iced::Result {
     iced::application(Blueprint::title, Blueprint::update, Blueprint::view)
@@ -18,21 +18,27 @@ pub fn show(blueprint: crate::Blueprint<usize>) -> iced::Result {
 
 #[derive(Debug)]
 struct Blueprint {
-    zoom_level: i32,
-    mouse: Point,
-    position: Option<Point>,
-    _image: Handle,
-    blueprint: crate::Blueprint<usize>,
+    zoom_level: ZoomLevel,
+    translation: Vector,
+    mouse_position: Point,
+    fixed_position: Option<Point>,
+    blueprint: DrawableBlueprint,
+    raw_blueprint: crate::Blueprint<usize>,
 }
 
 impl Blueprint {
     fn new(blueprint: crate::Blueprint<usize>) -> Self {
+        let translation = Vector::new(50.0, 50.0);
         Self {
-            zoom_level: 0,
-            mouse: Default::default(),
-            position: None,
-            _image: Handle::from_bytes(include_str!("../local/home.ppm")),
-            blueprint,
+            zoom_level: ZoomLevel::default(),
+            translation,
+            mouse_position: Default::default(),
+            fixed_position: None,
+            blueprint: DrawableBlueprint {
+                blueprint: blueprint.clone(),
+                translation,
+            },
+            raw_blueprint: blueprint,
         }
     }
 }
@@ -40,17 +46,33 @@ impl Blueprint {
 impl Blueprint {
     fn update(&mut self, message: Message) {
         match message {
-            Message::ZoomIn => self.zoom_level += 1,
-            Message::ZoomOut => self.zoom_level -= 1,
-            Message::ZoomReset => self.zoom_level = 0,
-            Message::CursorMoved(point) => self.mouse = point,
+            Message::ZoomIn => {
+                self.zoom_level = self.zoom_level.zoom_in();
+            }
+            Message::ZoomOut => {
+                self.zoom_level = self.zoom_level.zoom_out();
+            }
+            Message::ZoomReset => {
+                self.zoom_level = ZoomLevel::default();
+                self.translation = Vector::new(50.0, 50.0);
+            }
+            Message::TranslateUp => self.translation.y -= 10.0,
+            Message::TranslateLeft => self.translation.x -= 10.0,
+            Message::TranslateDown => self.translation.y += 10.0,
+            Message::TranslateRight => self.translation.x += 10.0,
+            Message::CursorMoved(point) => self.mouse_position = point,
             Message::StorePosition => {
-                self.position = Some(self.mouse);
+                self.fixed_position = Some(self.mouse_position);
             }
             Message::DropPosition => {
-                self.position = None;
+                self.fixed_position = None;
             }
         }
+
+        self.blueprint = DrawableBlueprint {
+            blueprint: self.raw_blueprint.scale(self.zoom_level.scale_factor()),
+            translation: self.translation,
+        };
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -60,8 +82,12 @@ impl Blueprint {
                 modifiers,
                 ..
             }) if modifiers.is_empty() => match c.as_str() {
-                "i" => Some(Message::ZoomIn),
-                "o" => Some(Message::ZoomOut),
+                "i" | "e" => Some(Message::ZoomIn),
+                "o" | "q" => Some(Message::ZoomOut),
+                "w" => Some(Message::TranslateUp),
+                "a" => Some(Message::TranslateLeft),
+                "s" => Some(Message::TranslateDown),
+                "d" => Some(Message::TranslateRight),
                 "0" => Some(Message::ZoomReset),
                 _ => None,
             },
@@ -80,26 +106,25 @@ impl Blueprint {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let zoom_level = text(format!("zoom level: {}", self.zoom_level));
+        let zoom_level = text(format!("zoom: {}", self.zoom_level));
         let mouse_position = text(format!(
             "mouse: {}, {}",
-            self.mouse.x.floor(),
-            self.mouse.y.floor()
+            self.mouse_position.x.floor(),
+            self.mouse_position.y.floor()
         ));
-        let delta = self.position.map(|position| {
-            text(format!(
-                "dx: {}, dy: {}; area: {}",
-                (self.mouse.x - position.x).floor(),
-                (self.mouse.y - position.y).floor(),
-                ((self.mouse.x - position.x) * (self.mouse.y - position.y)).floor()
-            ))
+        let delta = self.fixed_position.map(|position| {
+            let dx = ((self.mouse_position.x - position.x) / self.zoom_level.scale_factor())
+                .floor()
+                .abs();
+            let dy = ((self.mouse_position.y - position.y) / self.zoom_level.scale_factor())
+                .floor()
+                .abs();
+            text(format!("dx: {dx}, dy: {dy}; area: {}", dx * dy))
         });
 
         let header = row![zoom_level, mouse_position]
             .push_maybe(delta)
             .spacing(20);
-
-        // let image = image(self.image.clone()).content_fit(ContentFit::None);
 
         let image = canvas(&self.blueprint)
             .width(Length::Fill)
@@ -152,9 +177,19 @@ enum Message {
     CursorMoved(Point),
     StorePosition,
     DropPosition,
+    TranslateUp,
+    TranslateLeft,
+    TranslateDown,
+    TranslateRight,
 }
 
-impl<Message> canvas::Program<Message> for crate::Blueprint<usize> {
+#[derive(Debug)]
+struct DrawableBlueprint {
+    blueprint: crate::Blueprint<usize>,
+    translation: Vector,
+}
+
+impl<Message> canvas::Program<Message> for DrawableBlueprint {
     type State = ();
 
     fn draw(
@@ -166,8 +201,9 @@ impl<Message> canvas::Program<Message> for crate::Blueprint<usize> {
         _cursor: Cursor,
     ) -> Vec<Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        frame.translate(Vector::new(50., 50.));
-        for shape in self.shapes_iter() {
+        frame.translate(self.translation);
+
+        for shape in self.blueprint.shapes_iter() {
             for edge in shape.edges_iter() {
                 if edge.color().is_transparent() {
                     continue;
@@ -206,13 +242,94 @@ impl From<crate::Color> for Color {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct ZoomLevel {
+    num: u8,
+    denum: u8,
+}
+
+impl ZoomLevel {
+    fn zoom_in(self) -> Self {
+        if self.denum == 1 {
+            Self {
+                num: self.num + 1,
+                denum: self.denum,
+            }
+        } else {
+            Self {
+                num: self.num,
+                denum: self.denum - 1,
+            }
+        }
+    }
+
+    fn zoom_out(self) -> Self {
+        if self.num == 1 {
+            Self {
+                num: self.num,
+                denum: self.denum + 1,
+            }
+        } else {
+            Self {
+                num: self.num - 1,
+                denum: self.denum,
+            }
+        }
+    }
+
+    fn scale_factor(&self) -> f32 {
+        self.num as f32 / self.denum as f32
+    }
+}
+
+impl Display for ZoomLevel {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.denum > 1 {
+            write!(f, "{}/{}", self.num, self.denum)
+        } else {
+            write!(f, "{}", self.num)
+        }
+    }
+}
+
+impl Default for ZoomLevel {
+    fn default() -> Self {
+        Self { num: 1, denum: 1 }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::ui::ZoomLevel;
     use iced::Color;
 
     #[test]
     fn test_color() {
         let color = Color::from(crate::Color::Red);
         assert_eq!(color, Color::from_rgba(1., 0., 0., 1.));
+    }
+
+    #[test]
+    fn zoom() {
+        let zoom = ZoomLevel::default();
+        assert_eq!(zoom, ZoomLevel { num: 1, denum: 1 });
+        let zoom = zoom.zoom_in();
+        assert_eq!(zoom, ZoomLevel { num: 2, denum: 1 });
+        let zoom = zoom.zoom_in();
+        assert_eq!(zoom, ZoomLevel { num: 3, denum: 1 });
+        let zoom = zoom.zoom_out();
+        assert_eq!(zoom, ZoomLevel { num: 2, denum: 1 });
+        let zoom = zoom.zoom_out();
+        assert_eq!(zoom, ZoomLevel { num: 1, denum: 1 });
+        let zoom = zoom.zoom_out();
+        assert_eq!(zoom, ZoomLevel { num: 1, denum: 2 });
+        let zoom = zoom.zoom_out();
+        assert_eq!(zoom, ZoomLevel { num: 1, denum: 3 });
+        let zoom = zoom.zoom_in();
+        assert_eq!(zoom, ZoomLevel { num: 1, denum: 2 });
+        let zoom = zoom.zoom_in();
+        assert_eq!(zoom, ZoomLevel { num: 1, denum: 1 });
+        let zoom = zoom.zoom_in();
+        assert_eq!(zoom, ZoomLevel { num: 2, denum: 1 });
     }
 }

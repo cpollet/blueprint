@@ -73,6 +73,18 @@ impl Blueprint<i32> {
     }
 }
 
+impl Blueprint<usize> {
+    pub fn scale(&self, factor: f32) -> Blueprint<usize> {
+        Self {
+            shapes: self
+                .shapes
+                .iter()
+                .map(|shape| shape.scale(factor))
+                .collect(),
+        }
+    }
+}
+
 impl Bound<i32> for &Blueprint<i32> {
     fn boundaries(self) -> (Point<i32>, Point<i32>) {
         self.shapes.iter().boundaries()
@@ -121,6 +133,14 @@ pub struct Shape<T: Copy> {
 impl<T: Copy> Shape<T> {
     pub fn edges_iter(&self) -> Iter<'_, Edge<T>> {
         self.edges.iter()
+    }
+}
+
+impl Shape<usize> {
+    pub fn scale(&self, factor: f32) -> Shape<usize> {
+        Self {
+            edges: self.edges.iter().map(|edge| edge.scale(factor)).collect(),
+        }
     }
 }
 
@@ -219,6 +239,16 @@ impl Edge<i32> {
             from,
             to,
             attr: Attributes::default().push(Attribute::Color(color)),
+        }
+    }
+}
+
+impl Edge<usize> {
+    pub fn scale(&self, factor: f32) -> Edge<usize> {
+        Edge {
+            from: self.from.scale(factor),
+            to: self.to.scale(factor),
+            attr: self.attr.clone(),
         }
     }
 }
@@ -326,41 +356,6 @@ enum Attribute {
     Color(Color),
 }
 
-// #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Hash)]
-// pub struct Node<T: Copy> {
-//     point: Point<T>,
-// }
-
-// impl Node<i32> {
-//     pub fn new(x: i32, y: i32) -> Node<i32> {
-//         Node {
-//             point: Point { x, y },
-//         }
-//     }
-// }
-
-// impl Translate for Node<i32> {
-//     fn translate(&mut self, dx: i32, dy: i32) {
-//         self.point.translate(dx, dy);
-//     }
-// }
-
-// impl Draw for Node<usize> {
-//     fn draw(&self, canvas: &mut Canvas) {
-//         self.point.draw(canvas);
-//     }
-// }
-//
-// impl TryFrom<Node<i32>> for Node<usize> {
-//     type Error = ();
-//
-//     fn try_from(value: Node<i32>) -> Result<Self, Self::Error> {
-//         Ok(Self {
-//             point: value.point.try_into()?,
-//         })
-//     }
-// }
-
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct Point<T> {
@@ -425,6 +420,13 @@ impl Point<usize> {
         Point {
             x: self.x.max(other.x),
             y: self.y.max(other.y),
+        }
+    }
+
+    fn scale(&self, factor: f32) -> Point<usize> {
+        Self {
+            x: (self.x as f64 * factor as f64).round() as usize,
+            y: (self.y as f64 * factor as f64).round() as usize,
         }
     }
 }

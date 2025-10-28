@@ -1,10 +1,11 @@
+use iced::alignment::{Horizontal, Vertical};
 use iced::keyboard::key::Named;
 use iced::mouse::Cursor;
-use iced::widget::canvas::{Geometry, Path, Stroke};
+use iced::widget::canvas::{Geometry, Path, Stroke, Text};
 use iced::widget::{MouseArea, canvas, column, container, row, text};
 use iced::{
-    Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Size, Subscription, Task,
-    Theme, Vector, border, event, keyboard, padding,
+    Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Subscription, Task, Theme,
+    Vector, border, event, keyboard, padding,
 };
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, Sub};
@@ -63,10 +64,10 @@ impl Blueprint {
                 self.zoom_level = ZoomLevel::default();
                 self.translation = Vector::new(50.0, 50.0);
             }
-            Message::TranslateUp => self.translation.y -= 10.0,
-            Message::TranslateLeft => self.translation.x -= 10.0,
-            Message::TranslateDown => self.translation.y += 10.0,
-            Message::TranslateRight => self.translation.x += 10.0,
+            Message::TranslateUp => self.translation.y -= 1.0,
+            Message::TranslateLeft => self.translation.x -= 1.0,
+            Message::TranslateDown => self.translation.y += 1.0,
+            Message::TranslateRight => self.translation.x += 1.0,
             Message::CursorMoved(point) => {
                 self.mouse_position = point;
 
@@ -140,18 +141,20 @@ impl Blueprint {
             self.mouse_position.x.floor(),
             self.mouse_position.y.floor()
         ));
-        let delta = self
+
+        let distances = self
             .fixed_position
             .filter(|_| matches!(self.mouse_mode, MouseMode::Select))
-            .map(|position| {
-                let dx = ((self.mouse_position.x - position.x) / self.zoom_level.scale_factor())
-                    .floor()
-                    .abs();
-                let dy = ((self.mouse_position.y - position.y) / self.zoom_level.scale_factor())
-                    .floor()
-                    .abs();
-                text(format!("dx: {dx}, dy: {dy}; area: {}", dx * dy))
-            });
+            .map(|position| Distances::from(self.mouse_position, position, self.zoom_level));
+
+        let delta = distances.map(|d| {
+            text(format!(
+                "dx: {}, dy: {}; area: {}",
+                d.horizontal.floor(),
+                d.vertical.floor(),
+                d.diagonal.floor()
+            ))
+        });
 
         let header = row![zoom_level, mouse_position]
             .push_maybe(delta)
@@ -161,9 +164,7 @@ impl Blueprint {
             blueprint: self.raw_blueprint.scale(self.zoom_level.scale_factor()),
             translation: self.translation,
             mouse_position: self.mouse_position,
-            fixed_position: self
-                .fixed_position
-                .filter(|_| matches!(self.mouse_mode, MouseMode::Select)),
+            distances: self.fixed_position.zip(distances),
         })
         .width(Length::Fill)
         .height(Length::Fill);
@@ -219,7 +220,7 @@ struct DrawableBlueprint {
     blueprint: crate::Blueprint<usize>,
     translation: Vector,
     mouse_position: Point,
-    fixed_position: Option<Point>,
+    distances: Option<(Point, Distances)>,
 }
 
 impl<Message> canvas::Program<Message> for DrawableBlueprint {
@@ -248,17 +249,61 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
             }
         }
 
-        if let Some(fixed_position) = self.fixed_position {
+        if let Some((fixed_position, distances)) = self.distances {
             let top_left = fixed_position.sub(self.translation);
             let bottom_right = self.mouse_position.sub(self.translation);
-            let size = Size::new(bottom_right.x - top_left.x, bottom_right.y - top_left.y);
-            let rect = Path::rectangle(top_left, size);
-            frame.stroke(
-                &rect,
-                Stroke::default().with_color(Color::new(1., 0., 1., 0.8)),
-            )
-        }
+            let top_right = Point::new(bottom_right.x, top_left.y);
+            let bottom_left = Point::new(top_left.x, bottom_right.y);
 
+            let lhline = Path::line(top_left, top_right);
+            frame.stroke(
+                &lhline,
+                Stroke::default().with_color(Color::new(1., 0., 1., 1.0)),
+            );
+            let rhline = Path::line(bottom_left, bottom_right);
+            frame.stroke(
+                &rhline,
+                Stroke::default().with_color(Color::new(0.8, 0.8, 0.8, 0.8)),
+            );
+
+            let vtline = Path::line(top_left, bottom_left);
+            frame.stroke(
+                &vtline,
+                Stroke::default().with_color(Color::new(1., 0., 1., 1.0)),
+            );
+            let vbline = Path::line(top_right, bottom_right);
+            frame.stroke(
+                &vbline,
+                Stroke::default().with_color(Color::new(0.8, 0.8, 0.8, 1.0)),
+            );
+
+            let dline = Path::line(top_left, bottom_right);
+            frame.stroke(
+                &dline,
+                Stroke::default().with_color(Color::new(1., 0., 1., 1.0)),
+            );
+
+            let mut hdistance = Text::from(format!("{}", distances.horizontal.floor()));
+            hdistance.horizontal_alignment = Horizontal::Center;
+            hdistance.vertical_alignment = Vertical::Center;
+            hdistance.position = Point::new((top_left.x + top_right.x) / 2., top_left.y - 10.);
+            frame.fill_text(hdistance);
+
+            let mut vdistance = Text::from(format!("{}", distances.vertical.floor()));
+            vdistance.position = Point::new(top_left.x + 15., (top_left.y + bottom_left.y) / 2.);
+            vdistance.horizontal_alignment = Horizontal::Center;
+            vdistance.vertical_alignment = Vertical::Center;
+            frame.fill_text(vdistance);
+
+            let mut ddistance = Text::from(format!("{}", distances.diagonal.floor()));
+            ddistance.horizontal_alignment = Horizontal::Center;
+            ddistance.vertical_alignment = Vertical::Center;
+            ddistance.position = Point::new(
+                top_left.x + distances.horizontal * 0.75,
+                top_left.y + distances.vertical * 0.75,
+            );
+            frame.fill_text(ddistance);
+        }
         vec![frame.into_geometry()]
     }
 }
@@ -337,6 +382,23 @@ impl Display for ZoomLevel {
 impl Default for ZoomLevel {
     fn default() -> Self {
         Self { num: 1, denum: 1 }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Distances {
+    horizontal: f32,
+    vertical: f32,
+    diagonal: f32,
+}
+
+impl Distances {
+    fn from(p1: Point, p2: Point, zoom_level: ZoomLevel) -> Self {
+        Self {
+            horizontal: ((p1.x - p2.x) / zoom_level.scale_factor()).abs(),
+            vertical: ((p1.y - p2.y) / zoom_level.scale_factor()).abs(),
+            diagonal: (p1.distance(p2)) / zoom_level.scale_factor(),
+        }
     }
 }
 

@@ -1,3 +1,5 @@
+use crate::open_and_watch_file;
+use futures::channel::mpsc::Sender;
 use iced::alignment::{Horizontal, Vertical};
 use iced::keyboard::key::Named;
 use iced::mouse::Cursor;
@@ -7,19 +9,34 @@ use iced::{
     Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Subscription, Task, Theme,
     Vector, border, event, keyboard, padding,
 };
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Sub};
+use std::path::PathBuf;
 
-pub fn show(blueprint: crate::Blueprint<usize>) -> iced::Result {
+pub fn show(path: PathBuf, blueprint: crate::Blueprint<usize>) -> iced::Result {
     iced::application(Blueprint::title, Blueprint::update, Blueprint::view)
         .subscription(Blueprint::subscription)
         .theme(|_| Theme::Light)
         .default_font(Font::MONOSPACE)
-        .run_with(|| (Blueprint::new(blueprint), Task::none()))
+        .run_with(|| (Blueprint::new(path, blueprint), Task::none()))
+}
+
+/// events received by the UI
+pub enum AppEvent {
+    Ready(Sender<Command>),
+    BlueprintUpdated(crate::Blueprint<usize>),
+}
+
+/// commands sent from the UI
+#[derive(Debug)]
+pub enum Command {
+    OpenFile(PathBuf),
 }
 
 #[derive(Debug)]
 struct Blueprint {
+    path: PathBuf,
+    sender: Option<Sender<Command>>,
     zoom_level: ZoomLevel,
     translation: Vector,
     fixed_translation: Option<Vector>,
@@ -30,16 +47,18 @@ struct Blueprint {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-enum MouseMode {
+pub enum MouseMode {
     #[default]
     Select,
     Move,
 }
 
 impl Blueprint {
-    fn new(blueprint: crate::Blueprint<usize>) -> Self {
+    fn new(path: PathBuf, blueprint: crate::Blueprint<usize>) -> Self {
         let translation = Vector::new(50.0, 50.0);
         Self {
+            path,
+            sender: None,
             zoom_level: ZoomLevel::default(),
             translation,
             fixed_translation: None,
@@ -93,45 +112,63 @@ impl Blueprint {
                 self.fixed_translation = None;
                 self.fixed_position = None;
             }
+            Message::BlueprintUpdated(blueprint) => {
+                println!("Blueprint reloaded");
+                self.raw_blueprint = blueprint;
+            }
+            Message::SetSender(sender) => {
+                self.sender = Some(sender);
+                self.sender
+                    .as_mut()
+                    .unwrap()
+                    .try_send(Command::OpenFile(self.path.clone()))
+                    .unwrap();
+            }
         }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        event::listen_with(|e, _, _| match e {
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Character(c),
-                modifiers,
-                ..
-            }) if modifiers.is_empty() => match c.as_str() {
-                "i" | "e" => Some(Message::ZoomIn),
-                "o" | "q" => Some(Message::ZoomOut),
-                "w" => Some(Message::TranslateUp),
-                "a" => Some(Message::TranslateLeft),
-                "s" => Some(Message::TranslateDown),
-                "d" => Some(Message::TranslateRight),
-                "0" => Some(Message::ZoomReset),
+        Subscription::batch(vec![
+            Subscription::run(open_and_watch_file).map(|e| match e {
+                AppEvent::BlueprintUpdated(blueprint) => Message::BlueprintUpdated(blueprint),
+                AppEvent::Ready(sender) => Message::SetSender(sender),
+            }),
+            event::listen_with(|e, _, _| match e {
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Character(c),
+                    modifiers,
+                    ..
+                }) if modifiers.is_empty() => match c.as_str() {
+                    "i" | "e" => Some(Message::ZoomIn),
+                    "o" | "q" => Some(Message::ZoomOut),
+                    "w" => Some(Message::TranslateUp),
+                    "a" => Some(Message::TranslateLeft),
+                    "s" => Some(Message::TranslateDown),
+                    "d" => Some(Message::TranslateRight),
+                    "0" => Some(Message::ZoomReset),
+                    _ => None,
+                },
+                Event::Keyboard(keyboard::Event::KeyReleased {
+                    key: keyboard::Key::Named(Named::Space),
+                    modifiers,
+                    ..
+                }) if modifiers.is_empty() => Some(Message::StorePosition),
+                Event::Keyboard(keyboard::Event::KeyReleased {
+                    key: keyboard::Key::Named(Named::Escape),
+                    modifiers,
+                    ..
+                }) if modifiers.is_empty() => Some(Message::DropPosition),
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(Named::Control),
+                    ..
+                }) => Some(Message::ChangeMouseMode(MouseMode::Move)),
+                Event::Keyboard(keyboard::Event::KeyReleased {
+                    key: keyboard::Key::Named(Named::Control),
+                    ..
+                }) => Some(Message::ChangeMouseMode(Default::default())),
                 _ => None,
-            },
-            Event::Keyboard(keyboard::Event::KeyReleased {
-                key: keyboard::Key::Named(Named::Space),
-                modifiers,
-                ..
-            }) if modifiers.is_empty() => Some(Message::StorePosition),
-            Event::Keyboard(keyboard::Event::KeyReleased {
-                key: keyboard::Key::Named(Named::Escape),
-                modifiers,
-                ..
-            }) if modifiers.is_empty() => Some(Message::DropPosition),
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(Named::Control),
-                ..
-            }) => Some(Message::ChangeMouseMode(MouseMode::Move)),
-            Event::Keyboard(keyboard::Event::KeyReleased {
-                key: keyboard::Key::Named(Named::Control),
-                ..
-            }) => Some(Message::ChangeMouseMode(Default::default())),
-            _ => None,
-        })
+            }),
+        ])
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -201,7 +238,7 @@ impl Blueprint {
 }
 
 #[derive(Debug, Clone)]
-enum Message {
+pub enum Message {
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -213,6 +250,8 @@ enum Message {
     TranslateLeft,
     TranslateDown,
     TranslateRight,
+    BlueprintUpdated(crate::Blueprint<usize>),
+    SetSender(Sender<Command>),
 }
 
 #[derive(Debug)]

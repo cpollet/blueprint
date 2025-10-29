@@ -4,11 +4,12 @@ use chumsky::input::ValueInput;
 use chumsky::prelude::*;
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::path::Path;
 
 pub type Span = SimpleSpan;
 pub type Spanned<T> = (T, Span);
 
-pub fn parse<'s>(src: &'s str, filename: &str) -> Vec<Vec<EdgeStart<'s>>> {
+pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<EdgeStart<'s>>> {
     let (tokens, lexer_errors) = lexer().parse(src).into_output_errors();
     let tokens = tokens.unwrap_or_default();
 
@@ -33,22 +34,22 @@ pub fn parse<'s>(src: &'s str, filename: &str) -> Vec<Vec<EdgeStart<'s>>> {
             .for_each(|e| {
                 Report::build(
                     ReportKind::Error,
-                    (filename.to_string(), e.span().into_range()),
+                    (filename.display().to_string(), e.span().into_range()),
                 )
                 .with_config(ariadne::Config::new().with_index_type(ariadne::IndexType::Byte))
                 .with_message(e.to_string())
                 .with_label(
-                    Label::new((filename.to_string(), e.span().into_range()))
+                    Label::new((filename.display().to_string(), e.span().into_range()))
                         .with_message(e.reason().to_string())
                         .with_color(Color::Red),
                 )
                 .with_labels(e.contexts().map(|(label, span)| {
-                    Label::new((filename.to_string(), span.into_range()))
+                    Label::new((filename.display().to_string(), span.into_range()))
                         .with_message(format!("while parsing this {label}"))
                         .with_color(Color::Yellow)
                 }))
                 .finish()
-                .print(sources([(filename.to_string(), src)]))
+                .print(sources([(filename.display().to_string(), src)]))
                 .unwrap()
             });
     }

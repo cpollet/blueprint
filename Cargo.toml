@@ -6,4 +6,7 @@ edition = "2024"
 [dependencies]
 ariadne = "0.5.1"
 chumsky = "0.11.1"
-iced = { version = "0.13.1", features = ["debug", "image", "canvas"] }
+iced = { version = "0.13.1", features = ["debug", "image", "canvas", "tokio"] }
+iced_futures = "0.13.2"
+notify = "8.2.0"
+futures = "0.3.31"

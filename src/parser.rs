@@ -1,4 +1,3 @@
-use crate::{Coord, EdgeStart};
 use ariadne::{Color, Label, Report, ReportKind, sources};
 use chumsky::input::ValueInput;
 use chumsky::prelude::*;
@@ -8,6 +7,20 @@ use std::path::Path;
 
 pub type Span = SimpleSpan;
 pub type Spanned<T> = (T, Span);
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub enum Coord<'s> {
+    Absolute(i32, i32, Option<&'s str>),
+    Relative(i32, i32, Option<&'s str>),
+    Reference(&'s str),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct EdgeStart<'s> {
+    pub coord: Coord<'s>,
+    pub attributes: HashMap<&'s str, &'s str>,
+}
 
 pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<EdgeStart<'s>>> {
     let (tokens, lexer_errors) = lexer().parse(src).into_output_errors();

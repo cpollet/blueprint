@@ -3,7 +3,8 @@ mod parser;
 mod ppm;
 mod ui;
 
-use crate::domain::{Blueprint, Bound, Draw, Edge, Point, Shape};
+use crate::domain::{Blueprint, Bound, Color, Draw, Edge, Point, Shape};
+use crate::parser::Coord;
 use crate::ppm::PpmImage;
 use crate::ui::{AppEvent, Command};
 use futures::SinkExt;
@@ -137,17 +138,15 @@ pub fn open_and_watch_file() -> impl Stream<Item = AppEvent> {
             let mut next_fs_event = fs_events_rx.next();
             select! {
                 fs_event = next_fs_event => {
-                    if let Some(Ok(fs_event)) = fs_event {
-                        if let Some(event) = handle_fs_event(fs_event) {
+                    if let Some(Ok(fs_event)) = fs_event
+                        && let Some(event) = handle_fs_event(fs_event) {
                             output.send(event).await.unwrap();
-                        }
                     }
                 },
                 ui_command = next_ui_command => {
-                    if let Some(ui_command) = ui_command {
-                        if let Some(event) = handle_ui_command(ui_command, &mut watcher) {
+                    if let Some(ui_command) = ui_command
+                        && let Some(event) = handle_ui_command(ui_command, &mut watcher) {
                             output.send(event).await.unwrap();
-                        }
                     }
                 },
             }
@@ -177,7 +176,7 @@ fn handle_fs_event(event: notify::Event) -> Option<AppEvent> {
         &event.kind,
         notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
     ) {
-        let blueprint = load_blueprint(&&event.paths[0]).unwrap();
+        let blueprint = load_blueprint(&event.paths[0]).unwrap();
         return Some(AppEvent::BlueprintUpdated(blueprint));
     }
 
@@ -217,75 +216,6 @@ impl From<RecommendedWatcher> for FileWatcher {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
-enum Coord<'s> {
-    Absolute(i32, i32, Option<&'s str>),
-    Relative(i32, i32, Option<&'s str>),
-    Reference(&'s str),
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct EdgeStart<'s> {
-    coord: Coord<'s>,
-    attributes: HashMap<&'s str, &'s str>,
-}
-
-#[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Hash)]
-#[allow(unused)]
-enum Color {
-    Transparent,
-    White,
-    #[default]
-    Black,
-    Red,
-    Green,
-    Blue,
-    Yellow,
-    Magenta,
-    Cyan,
-    Custom(RgbaColor),
-}
-
-impl Color {
-    fn as_rgba(&self) -> RgbaColor {
-        match self {
-            Color::Transparent => (0, 0, 0, 0),
-            Color::White => (255, 255, 255, 255),
-            Color::Black => (0, 0, 0, 255),
-            Color::Red => (255, 0, 0, 255),
-            Color::Green => (0, 255, 0, 255),
-            Color::Blue => (0, 0, 255, 255),
-            Color::Yellow => (255, 255, 0, 255),
-            Color::Magenta => (255, 0, 255, 255),
-            Color::Cyan => (0, 255, 255, 255),
-            Color::Custom(c) => *c,
-        }
-    }
-
-    pub fn is_transparent(&self) -> bool {
-        matches!(self, Color::Transparent)
-    }
-}
-
-impl TryFrom<&str> for Color {
-    type Error = ();
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "transparent" => Ok(Color::Transparent),
-            "white" => Ok(Color::White),
-            "black" => Ok(Color::Black),
-            "red" => Ok(Color::Red),
-            "green" => Ok(Color::Green),
-            "blue" => Ok(Color::Blue),
-            "yellow" => Ok(Color::Yellow),
-            "magenta" => Ok(Color::Magenta),
-            "cyan" => Ok(Color::Cyan),
-            _ => Err(()),
-        }
-    }
-}
-
 struct Canvas {
     width: usize,
     height: usize,
@@ -314,9 +244,6 @@ impl TryFrom<Blueprint<i32>> for Canvas {
         Self::try_from(blueprint)
     }
 }
-
-/// g, b, b, alpha (true=transparent)
-type RgbaColor = (u8, u8, u8, u8);
 
 impl Canvas {
     fn new(width: usize, height: usize) -> Self {

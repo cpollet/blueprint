@@ -1,4 +1,4 @@
-use crate::{Canvas, Color};
+use crate::Canvas;
 use std::slice::Iter;
 
 pub trait Bound<T> {
@@ -455,6 +455,65 @@ impl TryFrom<Point<i32>> for Point<usize> {
             x: value.x as usize,
             y: value.y as usize,
         })
+    }
+}
+
+/// g, b, b, alpha (true=transparent)
+pub type RgbaColor = (u8, u8, u8, u8);
+
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[allow(unused)]
+pub enum Color {
+    Transparent,
+    White,
+    #[default]
+    Black,
+    Red,
+    Green,
+    Blue,
+    Yellow,
+    Magenta,
+    Cyan,
+    Custom(RgbaColor),
+}
+
+impl Color {
+    pub fn as_rgba(&self) -> RgbaColor {
+        match self {
+            Color::Transparent => (0, 0, 0, 0),
+            Color::White => (255, 255, 255, 255),
+            Color::Black => (0, 0, 0, 255),
+            Color::Red => (255, 0, 0, 255),
+            Color::Green => (0, 255, 0, 255),
+            Color::Blue => (0, 0, 255, 255),
+            Color::Yellow => (255, 255, 0, 255),
+            Color::Magenta => (255, 0, 255, 255),
+            Color::Cyan => (0, 255, 255, 255),
+            Color::Custom(c) => *c,
+        }
+    }
+
+    pub fn is_transparent(&self) -> bool {
+        matches!(self, Color::Transparent)
+    }
+}
+
+impl TryFrom<&str> for Color {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "transparent" => Ok(Color::Transparent),
+            "white" => Ok(Color::White),
+            "black" => Ok(Color::Black),
+            "red" => Ok(Color::Red),
+            "green" => Ok(Color::Green),
+            "blue" => Ok(Color::Blue),
+            "yellow" => Ok(Color::Yellow),
+            "magenta" => Ok(Color::Magenta),
+            "cyan" => Ok(Color::Cyan),
+            _ => Err(()),
+        }
     }
 }
 

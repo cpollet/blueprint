@@ -200,6 +200,7 @@ impl Blueprint {
         let image = canvas(DrawableBlueprint {
             blueprint: self.raw_blueprint.scale(self.zoom_level.scale_factor()),
             translation: self.translation,
+            zoom_level: self.zoom_level,
             mouse_position: self.mouse_position,
             distances: self.fixed_position.zip(distances),
         })
@@ -258,6 +259,7 @@ pub enum Message {
 struct DrawableBlueprint {
     blueprint: crate::Blueprint<usize>,
     translation: Vector,
+    zoom_level: ZoomLevel,
     mouse_position: Point,
     distances: Option<(Point, Distances)>,
 }
@@ -338,8 +340,8 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
             ddistance.horizontal_alignment = Horizontal::Center;
             ddistance.vertical_alignment = Vertical::Center;
             ddistance.position = Point::new(
-                top_left.x + distances.horizontal * 0.75,
-                top_left.y + distances.vertical * 0.75,
+                top_left.x + distances.horizontal * self.zoom_level.scale_factor() * 0.75,
+                top_left.y + distances.vertical * self.zoom_level.scale_factor() * 0.75,
             );
             frame.fill_text(ddistance);
         }

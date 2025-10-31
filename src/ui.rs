@@ -2,12 +2,12 @@ use crate::open_and_watch_file;
 use futures::channel::mpsc::Sender;
 use iced::alignment::{Horizontal, Vertical};
 use iced::keyboard::key::Named;
-use iced::mouse::Cursor;
+use iced::mouse::{Cursor, ScrollDelta};
 use iced::widget::canvas::{Geometry, Path, Stroke, Text};
 use iced::widget::{MouseArea, canvas, column, container, row, text};
 use iced::{
     Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Subscription, Task, Theme,
-    Vector, border, event, keyboard, padding,
+    Vector, border, event, keyboard, mouse, padding,
 };
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Sub};
@@ -134,6 +134,18 @@ impl Blueprint {
                 AppEvent::Ready(sender) => Message::SetSender(sender),
             }),
             event::listen_with(|e, _, _| match e {
+                Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: ScrollDelta::Pixels { x: _, y },
+                })
+                | Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: ScrollDelta::Lines { x: _, y },
+                }) => {
+                    if y > 0. {
+                        Some(Message::ZoomIn)
+                    } else {
+                        Some(Message::ZoomOut)
+                    }
+                }
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Character(c),
                     modifiers,

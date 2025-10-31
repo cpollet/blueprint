@@ -49,6 +49,7 @@ fn main() {
     ui::show(PathBuf::from(in_filename), Blueprint::<usize>::default()).expect("can launch UI");
 }
 
+// todo return a String as error and display it on the UI
 fn load_blueprint(path: &Path) -> Result<Blueprint<usize>, ()> {
     let src = fs::read_to_string(path).expect("Failed to read file");
     let shapes = parser::parse(src.as_str(), path);
@@ -80,10 +81,13 @@ fn load_blueprint(path: &Path) -> Result<Blueprint<usize>, ()> {
                     *tag,
                 ),
                 Coord::Reference(tag) => (
-                    *points.get(*tag).unwrap_or_else(|| {
-                        eprintln!("#{tag} not found",);
-                        exit(1);
-                    }),
+                    match points.get(*tag) {
+                        None => {
+                            eprintln!("#{tag} not found",);
+                            return Err(());
+                        }
+                        Some(p) => *p,
+                    },
                     None,
                 ),
             };
@@ -101,10 +105,13 @@ fn load_blueprint(path: &Path) -> Result<Blueprint<usize>, ()> {
                     .map(|last: Point<i32>| last.add(*x, *y))
                     .unwrap_or(Point::new(*y, *x)),
 
-                Coord::Reference(tag) => *points.get(tag).unwrap_or_else(|| {
-                    eprintln!("#{tag} not found",);
-                    exit(1);
-                }),
+                Coord::Reference(tag) => match points.get(tag) {
+                    None => {
+                        eprintln!("#{tag} not found",);
+                        return Err(());
+                    }
+                    Some(p) => *p,
+                },
             };
 
             let color = attr

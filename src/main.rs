@@ -172,15 +172,16 @@ fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Resul
 }
 
 fn handle_fs_event(event: notify::Event) -> Option<AppEvent> {
-    if matches!(
-        &event.kind,
+    match &event.kind {
         notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
-    ) {
-        let blueprint = load_blueprint(&event.paths[0]).unwrap();
-        return Some(AppEvent::BlueprintUpdated(blueprint));
+        | notify::EventKind::Access(notify::event::AccessKind::Close(
+            notify::event::AccessMode::Write,
+        )) => {
+            let blueprint = load_blueprint(&event.paths[0]).unwrap();
+            Some(AppEvent::BlueprintUpdated(blueprint))
+        }
+        _ => None,
     }
-
-    None
 }
 
 fn handle_ui_command(cmd: Command, watcher: &mut FileWatcher) -> Option<AppEvent> {

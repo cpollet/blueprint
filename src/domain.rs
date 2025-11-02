@@ -60,6 +60,25 @@ impl Blueprint {
                 .collect(),
         }
     }
+
+    pub fn find_closest_edge(&self, p: Point) -> Option<(&Edge, Point, f32)> {
+        let mut closest = None;
+
+        for shape in self.shapes.iter() {
+            for edge in shape.edges.iter() {
+                if edge.color() == Color::Transparent {
+                    continue;
+                }
+                if let Some((d, point)) = p.distance_to_edge(edge)
+                    && d < closest.map(|(_, d, _)| d).unwrap_or(f32::INFINITY)
+                {
+                    closest = Some((edge, d, point))
+                }
+            }
+        }
+
+        closest.map(|(e, d, p)| (e, p, d))
+    }
 }
 
 impl Bound for &Blueprint {
@@ -313,6 +332,50 @@ impl Point {
             y: (self.y * factor).round(),
         }
     }
+
+    pub fn distance_to_point(&self, point: &Point) -> f32 {
+        ((self.x - point.x).powf(2.) + (self.y - point.y).powf(2.)).sqrt()
+    }
+
+    pub fn distance_to_edge(&self, edge: &Edge) -> Option<(f32, Point)> {
+        let point = self.closest_point_on_edge(edge);
+        Some((self.distance_to_point(&point), point))
+    }
+
+    pub fn closest_point_on_edge(&self, edge: &Edge) -> Point {
+        let projection = self.project_on_edge(edge);
+
+        let edge_box = edge.boundaries();
+
+        if projection.x < edge_box.0.x || projection.y < edge_box.0.y {
+            return edge_box.0;
+        }
+
+        if projection.x > edge_box.1.x || projection.y > edge_box.1.y {
+            return edge_box.1;
+        }
+
+        projection
+    }
+
+    pub fn project_on_edge(&self, edge: &Edge) -> Point {
+        // http://stackoverflow.com/questions/64330618/finding-the-projection-of-a-point-onto-a-line
+        let a = edge.from;
+        let b = edge.to;
+
+        let ab_dx = b.x - a.x;
+        let ab_dy = b.y - a.y;
+
+        let c = self;
+
+        let acx = c.x - a.x;
+        let acy = c.y - a.y;
+
+        let coeff = (ab_dx * acx + ab_dy * acy) / (ab_dx * ab_dx + ab_dy * ab_dy);
+
+        Point::new(edge.from.x + ab_dx * coeff, edge.from.y + ab_dy * coeff)
+    }
+}
 
 impl From<iced::Point> for Point {
     fn from(value: iced::Point) -> Self {

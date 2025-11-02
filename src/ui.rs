@@ -3,7 +3,7 @@ use futures::channel::mpsc::Sender;
 use iced::alignment::{Horizontal, Vertical};
 use iced::keyboard::key::Named;
 use iced::mouse::{Cursor, ScrollDelta};
-use iced::widget::canvas::{Geometry, Path, Stroke, Text};
+use iced::widget::canvas::{Fill, Geometry, Path, Stroke, Style, Text};
 use iced::widget::{MouseArea, canvas, column, container, row, text};
 use iced::{
     Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Subscription, Task, Theme,
@@ -286,6 +286,9 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
         bounds: Rectangle,
         _cursor: Cursor,
     ) -> Vec<Geometry> {
+        let p = crate::Point::from(self.mouse_position.sub(self.translation));
+        let closest = self.blueprint.find_closest_edge(p);
+
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         frame.translate(self.translation);
 
@@ -299,6 +302,26 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
 
                 frame.stroke(&line, Stroke::default().with_color(edge.color().into()));
             }
+        }
+
+        if let Some((edge, point, distance)) = closest
+            && distance < 20.
+        {
+            let line = Path::line(edge.from.into(), edge.to.into());
+
+            frame.stroke(
+                &line,
+                Stroke::default().with_color(crate::Color::Red.into()),
+            );
+
+            let point = Path::circle(point.into(), 2.);
+            frame.fill(
+                &point,
+                Fill {
+                    style: Style::Solid(crate::Color::Red.into()),
+                    ..Default::default()
+                },
+            );
         }
 
         if let Some((fixed_position, distances)) = self.distances {
@@ -355,7 +378,6 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
                 top_left.y + distances.vertical * self.zoom_level.scale_factor() * 0.75,
             );
             frame.fill_text(ddistance);
-        } else {
         }
         vec![frame.into_geometry()]
     }

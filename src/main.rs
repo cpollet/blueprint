@@ -38,19 +38,17 @@ fn main() {
 
     let blueprint = load_blueprint(Path::new(in_filename)).unwrap();
 
-    let canvas = Canvas::try_from(blueprint)
-        .expect("Failed to convert blueprint")
-        .pad(50, 50);
+    let canvas = Canvas::from(blueprint).pad(50, 50);
 
     PpmImage::from(&canvas)
         .write_to_file(&out_filename)
         .unwrap();
 
-    ui::show(PathBuf::from(in_filename), Blueprint::<usize>::default()).expect("can launch UI");
+    ui::show(PathBuf::from(in_filename), Blueprint::default()).expect("can launch UI");
 }
 
 // todo return a String as error and display it on the UI
-fn load_blueprint(path: &Path) -> Result<Blueprint<usize>, ()> {
+fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
     let src = fs::read_to_string(path).expect("Failed to read file");
     let shapes = parser::parse(src.as_str(), path);
 
@@ -62,7 +60,7 @@ fn load_blueprint(path: &Path) -> Result<Blueprint<usize>, ()> {
             continue;
         }
 
-        let mut nodes: Vec<Point<i32>> = Vec::with_capacity(edge_starts.len());
+        let mut nodes: Vec<Point> = Vec::with_capacity(edge_starts.len());
         let mut edges = Vec::with_capacity(edge_starts.len() - 1);
 
         for ((from, attr), to) in edge_starts
@@ -71,13 +69,13 @@ fn load_blueprint(path: &Path) -> Result<Blueprint<usize>, ()> {
             .zip(edge_starts.iter().skip(1).map(|i| &i.coord))
         {
             let (from, tag) = match from {
-                Coord::Absolute(x, y, tag) => (Point::new(*x, *y), *tag),
+                Coord::Absolute(x, y, tag) => (Point::new(*x as f32, *y as f32), *tag),
                 Coord::Relative(x, y, tag) => (
                     nodes
                         .last()
                         .copied()
-                        .map(|last| last.add(*x, *y))
-                        .unwrap_or(Point::new(*y, *x)),
+                        .map(|last| last.add(*x as f32, *y as f32))
+                        .unwrap_or(Point::new(*y as f32, *x as f32)),
                     *tag,
                 ),
                 Coord::Reference(tag) => (
@@ -98,12 +96,12 @@ fn load_blueprint(path: &Path) -> Result<Blueprint<usize>, ()> {
             }
 
             let to = match to {
-                Coord::Absolute(x, y, _) => Point::new(*x, *y),
+                Coord::Absolute(x, y, _) => Point::new(*x as f32, *y as f32),
                 Coord::Relative(x, y, _) => nodes
                     .last()
                     .copied()
-                    .map(|last: Point<i32>| last.add(*x, *y))
-                    .unwrap_or(Point::new(*y, *x)),
+                    .map(|last: Point| last.add(*x as f32, *y as f32))
+                    .unwrap_or(Point::new(*y as f32, *x as f32)),
 
                 Coord::Reference(tag) => match points.get(tag) {
                     None => {
@@ -127,7 +125,7 @@ fn load_blueprint(path: &Path) -> Result<Blueprint<usize>, ()> {
     }
 
     blueprint.translate_to_origin();
-    Blueprint::<usize>::try_from(blueprint.clone())
+    Ok(blueprint)
 }
 
 pub fn open_and_watch_file() -> impl Stream<Item = AppEvent> {
@@ -230,26 +228,14 @@ struct Canvas {
     pixels: Vec<Color>,
 }
 
-impl TryFrom<Blueprint<usize>> for Canvas {
-    type Error = ();
-
-    fn try_from(blueprint: Blueprint<usize>) -> Result<Self, Self::Error> {
+impl From<Blueprint> for Canvas {
+    fn from(blueprint: Blueprint) -> Self {
         let boundaries = blueprint.boundaries();
         let (width, height) = (boundaries.1.x, boundaries.1.y);
-        let mut canvas = Canvas::new(width + 1, height + 1);
+        let mut canvas = Canvas::new((width + 1.).ceil() as usize, (height + 1.).ceil() as usize);
         blueprint.draw(&mut canvas);
 
-        Ok(canvas)
-    }
-}
-
-impl TryFrom<Blueprint<i32>> for Canvas {
-    type Error = ();
-
-    fn try_from(mut value: Blueprint<i32>) -> Result<Self, Self::Error> {
-        value.translate_to_origin();
-        let blueprint = Blueprint::<usize>::try_from(value)?;
-        Self::try_from(blueprint)
+        canvas
     }
 }
 

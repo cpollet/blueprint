@@ -1,45 +1,26 @@
 use crate::Canvas;
 use std::slice::Iter;
 
-pub trait Bound<T> {
-    fn boundaries(self) -> (Point<T>, Point<T>);
+pub trait Bound {
+    fn boundaries(self) -> (Point, Point);
 }
 
-trait Translate {
-    fn translate(&mut self, dx: i32, dy: i32);
+pub trait Translate {
+    fn translate(&mut self, dx: f32, dy: f32);
 }
 
 pub trait Draw {
     fn draw(&self, canvas: &mut Canvas);
 }
 
-impl<I, E> Bound<i32> for I
+impl<I, E> Bound for I
 where
     I: Iterator<Item = E>,
-    E: Bound<i32>,
+    E: Bound,
 {
-    fn boundaries(self) -> (Point<i32>, Point<i32>) {
+    fn boundaries(self) -> (Point, Point) {
         self.fold(
-            (Point::<i32>::MAX, Point::<i32>::MIN),
-            |(top_left, bottom_right), inner| {
-                let (shape_top_left, shape_bottom_right) = inner.boundaries();
-                (
-                    top_left.top_left(&shape_top_left),
-                    bottom_right.bottom_right(&shape_bottom_right),
-                )
-            },
-        )
-    }
-}
-
-impl<I, E> Bound<usize> for I
-where
-    I: Iterator<Item = E>,
-    E: Bound<usize>,
-{
-    fn boundaries(self) -> (Point<usize>, Point<usize>) {
-        self.fold(
-            (Point::<usize>::MAX, Point::<usize>::MIN),
+            (Point::MAX, Point::MIN),
             |(top_left, bottom_right), inner| {
                 let (shape_top_left, shape_bottom_right) = inner.boundaries();
                 (
@@ -52,29 +33,25 @@ where
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct Blueprint<T: Copy> {
-    shapes: Vec<Shape<T>>,
+pub struct Blueprint {
+    shapes: Vec<Shape>,
 }
 
-impl<T: Copy> Blueprint<T> {
-    pub fn push(&mut self, shape: Shape<T>) {
+impl Blueprint {
+    pub fn push(&mut self, shape: Shape) {
         self.shapes.push(shape);
     }
 
-    pub fn shapes_iter(&self) -> Iter<'_, Shape<T>> {
+    pub fn shapes_iter(&self) -> Iter<'_, Shape> {
         self.shapes.iter()
     }
-}
 
-impl Blueprint<i32> {
     pub fn translate_to_origin(&mut self) {
         let boundaries = self.boundaries();
         self.translate(-boundaries.0.x, -boundaries.0.y);
     }
-}
 
-impl Blueprint<usize> {
-    pub fn scale(&self, factor: f32) -> Blueprint<usize> {
+    pub fn scale(&self, factor: f32) -> Blueprint {
         Self {
             shapes: self
                 .shapes
@@ -85,86 +62,58 @@ impl Blueprint<usize> {
     }
 }
 
-impl Bound<i32> for &Blueprint<i32> {
-    fn boundaries(self) -> (Point<i32>, Point<i32>) {
+impl Bound for &Blueprint {
+    fn boundaries(self) -> (Point, Point) {
         self.shapes.iter().boundaries()
     }
 }
 
-impl Bound<usize> for &Blueprint<usize> {
-    fn boundaries(self) -> (Point<usize>, Point<usize>) {
-        self.shapes.iter().boundaries()
-    }
-}
-
-impl Translate for Blueprint<i32> {
-    fn translate(&mut self, dx: i32, dy: i32) {
+impl Translate for Blueprint {
+    fn translate(&mut self, dx: f32, dy: f32) {
         self.shapes
             .iter_mut()
             .for_each(|shape| shape.translate(dx, dy));
     }
 }
 
-impl Draw for Blueprint<usize> {
+impl Draw for Blueprint {
     fn draw(&self, canvas: &mut Canvas) {
         self.shapes.iter().for_each(|shape| shape.draw(canvas));
     }
 }
 
-impl TryFrom<Blueprint<i32>> for Blueprint<usize> {
-    type Error = ();
-
-    fn try_from(value: Blueprint<i32>) -> Result<Self, Self::Error> {
-        let mut shapes = Vec::with_capacity(value.shapes.len());
-
-        for shape in value.shapes.into_iter() {
-            shapes.push(shape.try_into()?);
-        }
-
-        Ok(Blueprint::<usize> { shapes })
-    }
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct Shape {
+    edges: Vec<Edge>,
 }
 
-#[derive(Default, Debug, Clone, Eq, PartialEq)]
-pub struct Shape<T: Copy> {
-    edges: Vec<Edge<T>>,
-}
-
-impl<T: Copy> Shape<T> {
-    pub fn edges_iter(&self) -> Iter<'_, Edge<T>> {
+impl Shape {
+    pub fn edges_iter(&self) -> Iter<'_, Edge> {
         self.edges.iter()
     }
-}
 
-impl Shape<usize> {
-    pub fn scale(&self, factor: f32) -> Shape<usize> {
+    pub fn scale(&self, factor: f32) -> Shape {
         Self {
             edges: self.edges.iter().map(|edge| edge.scale(factor)).collect(),
         }
     }
 }
 
-impl Bound<i32> for &Shape<i32> {
-    fn boundaries(self) -> (Point<i32>, Point<i32>) {
+impl Bound for &Shape {
+    fn boundaries(self) -> (Point, Point) {
         self.edges.iter().boundaries()
     }
 }
 
-impl Bound<usize> for &Shape<usize> {
-    fn boundaries(self) -> (Point<usize>, Point<usize>) {
-        self.edges.iter().boundaries()
-    }
-}
-
-impl Translate for Shape<i32> {
-    fn translate(&mut self, dx: i32, dy: i32) {
+impl Translate for Shape {
+    fn translate(&mut self, dx: f32, dy: f32) {
         self.edges
             .iter_mut()
             .for_each(|edge| edge.translate(dx, dy));
     }
 }
 
-impl Draw for Shape<usize> {
+impl Draw for Shape {
     fn draw(&self, canvas: &mut Canvas) {
         for edge in self.edges.iter() {
             edge.draw(canvas);
@@ -172,8 +121,8 @@ impl Draw for Shape<usize> {
     }
 }
 
-impl From<Vec<Point<i32>>> for Shape<i32> {
-    fn from(value: Vec<Point<i32>>) -> Self {
+impl From<Vec<Point>> for Shape {
+    fn from(value: Vec<Point>) -> Self {
         let edges = value
             .iter()
             .zip(value.iter().skip(1))
@@ -183,35 +132,21 @@ impl From<Vec<Point<i32>>> for Shape<i32> {
     }
 }
 
-impl From<Vec<Edge<i32>>> for Shape<i32> {
-    fn from(value: Vec<Edge<i32>>) -> Self {
+impl From<Vec<Edge>> for Shape {
+    fn from(value: Vec<Edge>) -> Self {
         Self { edges: value }
     }
 }
 
-impl TryFrom<Shape<i32>> for Shape<usize> {
-    type Error = ();
-
-    fn try_from(value: Shape<i32>) -> Result<Self, Self::Error> {
-        let mut edges = Vec::with_capacity(value.edges.len());
-
-        for edge in value.edges.into_iter() {
-            edges.push(edge.try_into()?);
-        }
-
-        Ok(Shape::<usize> { edges })
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
-pub struct Edge<T: Copy> {
-    pub from: Point<T>,
-    pub to: Point<T>,
+pub struct Edge {
+    pub from: Point,
+    pub to: Point,
     attr: Attributes,
 }
 
-impl<T: Copy> Edge<T> {
+impl Edge {
     pub fn color(&self) -> Color {
         self.attr
             .attributes
@@ -223,10 +158,8 @@ impl<T: Copy> Edge<T> {
             .copied()
             .unwrap_or(Color::Black)
     }
-}
 
-impl Edge<i32> {
-    pub fn new(x1: i32, y1: i32, x2: i32, y2: i32, color: Color) -> Self {
+    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32, color: Color) -> Self {
         Self {
             from: Point::new(x1, y1),
             to: Point::new(x2, y2),
@@ -234,17 +167,15 @@ impl Edge<i32> {
         }
     }
 
-    pub fn new_from_points(from: Point<i32>, to: Point<i32>, color: Color) -> Self {
+    pub fn new_from_points(from: Point, to: Point, color: Color) -> Self {
         Self {
             from,
             to,
             attr: Attributes::default().push(Attribute::Color(color)),
         }
     }
-}
 
-impl Edge<usize> {
-    pub fn scale(&self, factor: f32) -> Edge<usize> {
+    pub fn scale(&self, factor: f32) -> Edge {
         Edge {
             from: self.from.scale(factor),
             to: self.to.scale(factor),
@@ -253,8 +184,8 @@ impl Edge<usize> {
     }
 }
 
-impl Bound<i32> for &Edge<i32> {
-    fn boundaries(self) -> (Point<i32>, Point<i32>) {
+impl Bound for &Edge {
+    fn boundaries(self) -> (Point, Point) {
         (
             Point {
                 x: self.from.x.min(self.to.x),
@@ -268,29 +199,14 @@ impl Bound<i32> for &Edge<i32> {
     }
 }
 
-impl Bound<usize> for &Edge<usize> {
-    fn boundaries(self) -> (Point<usize>, Point<usize>) {
-        (
-            Point {
-                x: self.from.x.min(self.to.x),
-                y: self.from.y.min(self.to.y),
-            },
-            Point {
-                x: self.from.x.max(self.to.x),
-                y: self.from.y.max(self.to.y),
-            },
-        )
-    }
-}
-
-impl Translate for Edge<i32> {
-    fn translate(&mut self, dx: i32, dy: i32) {
+impl Translate for Edge {
+    fn translate(&mut self, dx: f32, dy: f32) {
         self.from.translate(dx, dy);
         self.to.translate(dx, dy);
     }
 }
 
-impl Draw for Edge<usize> {
+impl Draw for Edge {
     fn draw(&self, canvas: &mut Canvas) {
         let color = self.color();
 
@@ -298,13 +214,18 @@ impl Draw for Edge<usize> {
             return;
         }
 
-        let dx = self.to.x as i32 - self.from.x as i32;
-        let dy = self.to.y as i32 - self.from.y as i32;
+        let x1 = self.from.x as i32;
+        let x2 = self.to.x as i32;
+        let y1 = self.from.y as i32;
+        let y2 = self.to.y as i32;
+
+        let dx = x2 - x1;
+        let dy = y2 - y1;
 
         if dx == 0 {
-            let start_y = self.from.y.min(self.to.y);
+            let start_y = y1.min(y2) as usize;
             for y in start_y..start_y + dy.unsigned_abs() as usize + 1 {
-                canvas.set(self.from.x, y, color)
+                canvas.set(x1 as usize, y, color)
             }
             return;
         }
@@ -313,29 +234,17 @@ impl Draw for Edge<usize> {
 
         if dx > 0 {
             for step in 0..(dx + 1) as usize {
-                let x = self.from.x + step;
-                let y = (self.from.y as f32 + (step as f32 * slope)) as usize;
+                let x = x1 as usize + step;
+                let y = (self.from.y + (step as f32 * slope)) as usize;
                 canvas.set(x, y, color)
             }
         } else {
-            for x in 0..(dx.abs() + 1) as usize {
-                let y = (self.from.y as f32 - (x as f32 * slope)) as usize;
-                let x = self.from.x - x;
+            for x in 0..(dx.abs() + 1) {
+                let y = (self.from.y - (x as f32 * slope)) as usize;
+                let x = x1 as usize - x as usize;
                 canvas.set(x, y, color)
             }
         }
-    }
-}
-
-impl TryFrom<Edge<i32>> for Edge<usize> {
-    type Error = ();
-
-    fn try_from(value: Edge<i32>) -> Result<Self, Self::Error> {
-        Ok(Edge {
-            from: value.from.try_into()?,
-            to: value.to.try_into()?,
-            attr: value.attr,
-        })
     }
 }
 
@@ -356,105 +265,74 @@ enum Attribute {
     Color(Color),
 }
 
-#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Default, PartialEq)]
 #[non_exhaustive]
-pub struct Point<T> {
-    pub x: T,
-    pub y: T,
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
 }
 
-impl Point<i32> {
-    const MIN: Point<i32> = Point {
-        x: i32::MIN,
-        y: i32::MIN,
+impl Point {
+    const MIN: Point = Point {
+        x: f32::MIN,
+        y: f32::MIN,
     };
-    const MAX: Point<i32> = Point {
-        x: i32::MAX,
-        y: i32::MAX,
+    const MAX: Point = Point {
+        x: f32::MAX,
+        y: f32::MAX,
     };
 
-    pub fn new(x: i32, y: i32) -> Self {
+    pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
-    pub fn add(&self, dx: i32, dy: i32) -> Self {
+    pub fn add(&self, dx: f32, dy: f32) -> Self {
         Point {
             x: self.x + dx,
             y: self.y + dy,
         }
     }
 
-    fn top_left(&self, other: &Self) -> Point<i32> {
+    fn top_left(&self, other: &Self) -> Point {
         Point {
             x: self.x.min(other.x),
             y: self.y.min(other.y),
         }
     }
 
-    fn bottom_right(&self, other: &Self) -> Point<i32> {
-        Point {
-            x: self.x.max(other.x),
-            y: self.y.max(other.y),
-        }
-    }
-}
-
-impl Point<usize> {
-    const MIN: Point<usize> = Point {
-        x: usize::MIN,
-        y: usize::MIN,
-    };
-    const MAX: Point<usize> = Point {
-        x: usize::MAX,
-        y: usize::MAX,
-    };
-
-    fn top_left(&self, other: &Self) -> Point<usize> {
-        Point {
-            x: self.x.min(other.x),
-            y: self.y.min(other.y),
-        }
-    }
-
-    fn bottom_right(&self, other: &Self) -> Point<usize> {
+    fn bottom_right(&self, other: &Self) -> Point {
         Point {
             x: self.x.max(other.x),
             y: self.y.max(other.y),
         }
     }
 
-    fn scale(&self, factor: f32) -> Point<usize> {
+    fn scale(&self, factor: f32) -> Point {
         Self {
-            x: (self.x as f64 * factor as f64).round() as usize,
-            y: (self.y as f64 * factor as f64).round() as usize,
+            x: (self.x * factor).round(),
+            y: (self.y * factor).round(),
+        }
+    }
+
+impl From<iced::Point> for Point {
+    fn from(value: iced::Point) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
         }
     }
 }
 
-impl Translate for Point<i32> {
-    fn translate(&mut self, dx: i32, dy: i32) {
+impl Translate for Point {
+    fn translate(&mut self, dx: f32, dy: f32) {
         self.x += dx;
         self.y += dy;
     }
 }
 
-impl Draw for Point<usize> {
+impl Draw for Point {
     fn draw(&self, canvas: &mut Canvas) {
-        canvas.set(self.x, self.y, Color::Black);
-    }
-}
-
-impl TryFrom<Point<i32>> for Point<usize> {
-    type Error = ();
-
-    fn try_from(value: Point<i32>) -> Result<Self, Self::Error> {
-        if value.x < 0 || value.y < 0 {
-            return Err(());
-        }
-        Ok(Self {
-            x: value.x as usize,
-            y: value.y as usize,
-        })
+        canvas.set(self.x as usize, self.y as usize, Color::Black);
     }
 }
 
@@ -523,7 +401,11 @@ mod tests {
 
     #[test]
     fn shape_from_points() {
-        let shape = Shape::from(vec![Point::new(0, 0), Point::new(0, 1), Point::new(1, 1)]);
+        let shape = Shape::from(vec![
+            Point::new(0., 0.),
+            Point::new(0., 1.),
+            Point::new(1., 1.),
+        ]);
         assert_eq!(shape.edges.len(), 2);
     }
 }

@@ -13,7 +13,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Sub};
 use std::path::PathBuf;
 
-pub fn show(path: PathBuf, blueprint: crate::Blueprint<usize>) -> iced::Result {
+pub fn show(path: PathBuf, blueprint: crate::Blueprint) -> iced::Result {
     iced::application(Blueprint::title, Blueprint::update, Blueprint::view)
         .subscription(Blueprint::subscription)
         .theme(|_| Theme::Light)
@@ -24,7 +24,7 @@ pub fn show(path: PathBuf, blueprint: crate::Blueprint<usize>) -> iced::Result {
 /// events received by the UI
 pub enum AppEvent {
     Ready(Sender<Command>),
-    BlueprintUpdated(crate::Blueprint<usize>),
+    BlueprintUpdated(crate::Blueprint),
 }
 
 /// commands sent from the UI
@@ -43,7 +43,7 @@ struct Blueprint {
     mouse_position: Point,
     mouse_mode: MouseMode,
     fixed_position: Option<Point>,
-    raw_blueprint: crate::Blueprint<usize>,
+    raw_blueprint: crate::Blueprint,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -54,13 +54,12 @@ pub enum MouseMode {
 }
 
 impl Blueprint {
-    fn new(path: PathBuf, blueprint: crate::Blueprint<usize>) -> Self {
-        let translation = Vector::new(50.0, 50.0);
+    fn new(path: PathBuf, blueprint: crate::Blueprint) -> Self {
         Self {
             path,
             sender: None,
             zoom_level: ZoomLevel::default(),
-            translation,
+            translation: Vector::new(50.0, 50.0),
             fixed_translation: None,
             mouse_position: Default::default(),
             mouse_mode: Default::default(),
@@ -263,13 +262,13 @@ pub enum Message {
     TranslateLeft,
     TranslateDown,
     TranslateRight,
-    BlueprintUpdated(crate::Blueprint<usize>),
+    BlueprintUpdated(crate::Blueprint),
     SetSender(Sender<Command>),
 }
 
 #[derive(Debug)]
 struct DrawableBlueprint {
-    blueprint: crate::Blueprint<usize>,
+    blueprint: crate::Blueprint,
     translation: Vector,
     zoom_level: ZoomLevel,
     mouse_position: Point,
@@ -356,16 +355,17 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
                 top_left.y + distances.vertical * self.zoom_level.scale_factor() * 0.75,
             );
             frame.fill_text(ddistance);
+        } else {
         }
         vec![frame.into_geometry()]
     }
 }
 
-impl From<crate::Point<usize>> for Point {
-    fn from(value: crate::domain::Point<usize>) -> Self {
+impl From<crate::Point> for Point {
+    fn from(value: crate::domain::Point) -> Self {
         Self {
-            x: value.x as f32,
-            y: value.y as f32,
+            x: value.x,
+            y: value.y,
         }
     }
 }

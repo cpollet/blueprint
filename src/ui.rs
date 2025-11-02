@@ -336,19 +336,19 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
                 Stroke::default().with_color(Color::new(1., 0., 1., 1.0)),
             );
 
-            let mut hdistance = Text::from(format!("{}", distances.horizontal.floor()));
+            let mut hdistance = Text::from(format!("{}", distances.horizontal.abs().floor()));
             hdistance.horizontal_alignment = Horizontal::Center;
             hdistance.vertical_alignment = Vertical::Center;
             hdistance.position = Point::new((top_left.x + top_right.x) / 2., top_left.y - 10.);
             frame.fill_text(hdistance);
 
-            let mut vdistance = Text::from(format!("{}", distances.vertical.floor()));
+            let mut vdistance = Text::from(format!("{}", distances.vertical.abs().floor()));
             vdistance.position = Point::new(top_left.x + 15., (top_left.y + bottom_left.y) / 2.);
             vdistance.horizontal_alignment = Horizontal::Center;
             vdistance.vertical_alignment = Vertical::Center;
             frame.fill_text(vdistance);
 
-            let mut ddistance = Text::from(format!("{}", distances.diagonal.floor()));
+            let mut ddistance = Text::from(format!("{}", distances.diagonal.abs().floor()));
             ddistance.horizontal_alignment = Horizontal::Center;
             ddistance.vertical_alignment = Vertical::Center;
             ddistance.position = Point::new(
@@ -448,8 +448,8 @@ struct Distances {
 impl Distances {
     fn from(p1: Point, p2: Point, zoom_level: ZoomLevel) -> Self {
         Self {
-            horizontal: ((p1.x - p2.x) / zoom_level.scale_factor()).abs(),
-            vertical: ((p1.y - p2.y) / zoom_level.scale_factor()).abs(),
+            horizontal: (p1.x - p2.x) / zoom_level.scale_factor(),
+            vertical: (p1.y - p2.y) / zoom_level.scale_factor(),
             diagonal: (p1.distance(p2)) / zoom_level.scale_factor(),
         }
     }

@@ -1,3 +1,4 @@
+use crate::domain::Edge;
 use crate::open_and_watch_file;
 use futures::channel::mpsc::Sender;
 use iced::alignment::{Horizontal, Vertical};
@@ -204,12 +205,24 @@ impl Blueprint {
             ))
         });
 
+        let blueprint = self.raw_blueprint.scale(self.zoom_level.scale_factor());
+        let closest = blueprint
+            .find_closest_edge(crate::Point::from(
+                self.mouse_position.sub(self.translation),
+            ))
+            .filter(|(_, _, distance)| *distance < 20.);
+
+        let highlighted = closest.map(|(edge, _, _)| text(format!("line: {}", edge.line)));
         let header = row![zoom_level, mouse_position]
             .push_maybe(delta)
+            .push_maybe(highlighted)
             .spacing(20);
 
+        let highlighted = closest.map(|(edge, point, _)| (*edge, point));
+
         let image = canvas(DrawableBlueprint {
-            blueprint: self.raw_blueprint.scale(self.zoom_level.scale_factor()),
+            blueprint,
+            highlighted,
             translation: self.translation,
             zoom_level: self.zoom_level,
             mouse_position: self.mouse_position,
@@ -269,6 +282,7 @@ pub enum Message {
 #[derive(Debug)]
 struct DrawableBlueprint {
     blueprint: crate::Blueprint,
+    highlighted: Option<(Edge, crate::domain::Point)>,
     translation: Vector,
     zoom_level: ZoomLevel,
     mouse_position: Point,
@@ -286,27 +300,22 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
         bounds: Rectangle,
         _cursor: Cursor,
     ) -> Vec<Geometry> {
-        let p = crate::Point::from(self.mouse_position.sub(self.translation));
-        let closest = self.blueprint.find_closest_edge(p);
-
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         frame.translate(self.translation);
 
         for shape in self.blueprint.shapes_iter() {
             for edge in shape.edges_iter() {
-                if edge.color().is_transparent() {
+                if edge.color.is_transparent() {
                     continue;
                 }
 
                 let line = Path::line(edge.from.into(), edge.to.into());
 
-                frame.stroke(&line, Stroke::default().with_color(edge.color().into()));
+                frame.stroke(&line, Stroke::default().with_color(edge.color.into()));
             }
         }
 
-        if let Some((edge, point, distance)) = closest
-            && distance < 20.
-        {
+        if let Some((edge, point)) = &self.highlighted {
             let line = Path::line(edge.from.into(), edge.to.into());
 
             frame.stroke(
@@ -385,6 +394,15 @@ impl<Message> canvas::Program<Message> for DrawableBlueprint {
 
 impl From<crate::Point> for Point {
     fn from(value: crate::domain::Point) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+        }
+    }
+}
+
+impl From<&crate::Point> for Point {
+    fn from(value: &crate::domain::Point) -> Self {
         Self {
             x: value.x,
             y: value.y,

@@ -66,7 +66,7 @@ impl Blueprint {
 
         for shape in self.shapes.iter() {
             for edge in shape.edges.iter() {
-                if edge.color() == Color::Transparent {
+                if edge.color == Color::Transparent {
                     continue;
                 }
                 if let Some((d, point)) = p.distance_to_edge(edge)
@@ -140,57 +140,37 @@ impl Draw for Shape {
     }
 }
 
-impl From<Vec<Point>> for Shape {
-    fn from(value: Vec<Point>) -> Self {
-        let edges = value
-            .iter()
-            .zip(value.iter().skip(1))
-            .map(|(a, b)| Edge::new(a.x, a.y, b.x, b.y, Color::Red))
-            .collect::<Vec<_>>();
-        Self { edges }
-    }
-}
-
 impl From<Vec<Edge>> for Shape {
     fn from(value: Vec<Edge>) -> Self {
         Self { edges: value }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Edge {
     pub from: Point,
     pub to: Point,
-    attr: Attributes,
+    pub color: Color,
+    pub line: usize,
 }
 
 impl Edge {
-    pub fn color(&self) -> Color {
-        self.attr
-            .attributes
-            .iter()
-            .map(|a| match a {
-                Attribute::Color(c) => c,
-            })
-            .next()
-            .copied()
-            .unwrap_or(Color::Black)
-    }
-
-    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32, color: Color) -> Self {
+    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32, color: Color, line: usize) -> Self {
         Self {
             from: Point::new(x1, y1),
             to: Point::new(x2, y2),
-            attr: Attributes::default().push(Attribute::Color(color)),
+            color,
+            line,
         }
     }
 
-    pub fn new_from_points(from: Point, to: Point, color: Color) -> Self {
+    pub fn new_from_points(from: Point, to: Point, color: Color, line: usize) -> Self {
         Self {
             from,
             to,
-            attr: Attributes::default().push(Attribute::Color(color)),
+            color,
+            line,
         }
     }
 
@@ -198,7 +178,8 @@ impl Edge {
         Edge {
             from: self.from.scale(factor),
             to: self.to.scale(factor),
-            attr: self.attr.clone(),
+            color: self.color,
+            line: self.line,
         }
     }
 }
@@ -227,7 +208,7 @@ impl Translate for Edge {
 
 impl Draw for Edge {
     fn draw(&self, canvas: &mut Canvas) {
-        let color = self.color();
+        let color = self.color;
 
         if color.as_rgba().3 == 0 {
             return;
@@ -265,23 +246,6 @@ impl Draw for Edge {
             }
         }
     }
-}
-
-#[derive(Default, Debug, Clone, Eq, PartialEq, Hash)]
-struct Attributes {
-    attributes: Vec<Attribute>,
-}
-
-impl Attributes {
-    fn push(mut self, attr: Attribute) -> Self {
-        self.attributes.push(attr);
-        self
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-enum Attribute {
-    Color(Color),
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq)]
@@ -455,20 +419,5 @@ impl TryFrom<&str> for Color {
             "cyan" => Ok(Color::Cyan),
             _ => Err(()),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn shape_from_points() {
-        let shape = Shape::from(vec![
-            Point::new(0., 0.),
-            Point::new(0., 1.),
-            Point::new(1., 1.),
-        ]);
-        assert_eq!(shape.edges.len(), 2);
     }
 }

@@ -2,24 +2,30 @@ use ariadne::{Color, Label, Report, ReportKind, sources};
 use chumsky::input::ValueInput;
 use chumsky::prelude::*;
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::path::Path;
 
 pub type Span = SimpleSpan;
-pub type Spanned<T> = (T, Span);
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spanned<T: Clone + Debug + PartialEq> {
+    pub node: T,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Hash)]
 pub enum Coord<'s> {
     Absolute(i32, i32, Option<&'s str>),
     Relative(i32, i32, Option<&'s str>),
     Reference(&'s str),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 #[non_exhaustive]
 pub struct EdgeStart<'s> {
     pub coord: Coord<'s>,
     pub attributes: HashMap<&'s str, &'s str>,
+    pub start: usize,
 }
 
 pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<EdgeStart<'s>>> {
@@ -31,7 +37,7 @@ pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<EdgeStart<'s>>> {
         .parse(
             tokens
                 .as_slice()
-                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+                .map((src.len()..src.len()).into(), |t| (&t.node, &t.span)),
         )
         .into_output_errors();
 
@@ -151,7 +157,10 @@ fn lexer<'src>()
         .padded();
 
     token
-        .map_with(|tok, e| (tok, e.span()))
+        .map_with(|tok, e| Spanned {
+            node: tok,
+            span: e.span(),
+        })
         .padded_by(comment.repeated())
         .padded()
         .recover_with(skip_then_retry_until(any().ignored(), end()))
@@ -190,7 +199,10 @@ where
         .then(tag.or_not())
         .map(|((x, y), t)| Coord::Absolute(x, y, t));
     let coord_ref = just(Token::At).ignore_then(tag).map(Coord::Reference);
-    let coord = choice((coord_rel, coord_abs, coord_ref));
+    let coord = choice((coord_rel, coord_abs, coord_ref)).map_with(|c, e| Spanned {
+        node: c,
+        span: e.span(),
+    });
 
     let edge_attr = ident.then_ignore(just(Token::Colon)).then(ident);
     let edge_attr_list = edge_attr
@@ -201,8 +213,9 @@ where
 
     let node = coord
         .then(edge_attrs.or_not())
-        .map(|(coord, attributes)| EdgeStart {
-            coord,
+        .map(|(t, attributes)| EdgeStart {
+            coord: t.node,
+            start: t.span.start,
             attributes: attributes.unwrap_or_default(),
         });
     let nodes = node.repeated().collect::<Vec<_>>();
@@ -221,46 +234,82 @@ mod tests {
     fn test_lexer() {
         assert_eq!(
             lexer().parse("123").into_result(),
-            Ok(vec![(Token::Num(123), Span::from(0..3))])
+            Ok(vec![Spanned {
+                node: Token::Num(123),
+                span: Span::from(0..3)
+            }])
         );
         assert_eq!(
             lexer().parse("123 //comment").into_result(),
-            Ok(vec![(Token::Num(123), Span::from(0..3))])
+            Ok(vec![Spanned {
+                node: Token::Num(123),
+                span: Span::from(0..3)
+            }])
         );
         assert_eq!(
             lexer().parse("shape").into_result(),
-            Ok(vec![(Token::Shape, Span::from(0..5))])
+            Ok(vec![Spanned {
+                node: Token::Shape,
+                span: Span::from(0..5)
+            }])
         );
         assert_eq!(
             lexer().parse("ident").into_result(),
-            Ok(vec![(Token::Ident("ident"), Span::from(0..5))])
+            Ok(vec![Spanned {
+                node: Token::Ident("ident"),
+                span: Span::from(0..5)
+            }])
         );
         assert_eq!(
             lexer().parse("123 ident shape").into_result(),
             Ok(vec![
-                (Token::Num(123), Span::from(0..3)),
-                (Token::Ident("ident"), Span::from(4..9)),
-                (Token::Shape, Span::from(10..15))
+                Spanned {
+                    node: Token::Num(123),
+                    span: Span::from(0..3)
+                },
+                Spanned {
+                    node: Token::Ident("ident"),
+                    span: Span::from(4..9)
+                },
+                Spanned {
+                    node: Token::Shape,
+                    span: Span::from(10..15)
+                }
             ])
         );
         assert_eq!(
             lexer().parse("{}").into_result(),
             Ok(vec![
-                (Token::OpenCurly, Span::from(0..1)),
-                (Token::CloseCurly, Span::from(1..2)),
+                Spanned {
+                    node: Token::OpenCurly,
+                    span: Span::from(0..1)
+                },
+                Spanned {
+                    node: Token::CloseCurly,
+                    span: Span::from(1..2)
+                },
             ])
         );
         assert_eq!(
             lexer().parse("#my_tag").into_result(),
-            Ok(vec![(Token::Tag("my_tag"), Span::from(0..7))])
+            Ok(vec![Spanned {
+                node: Token::Tag("my_tag"),
+                span: Span::from(0..7)
+            }])
         );
         assert_eq!(
             lexer().parse("#-my-tag").into_result(),
-            Ok(vec![(Token::Tag("-my-tag"), Span::from(0..8))])
+            Ok(vec![Spanned {
+                node: Token::Tag("-my-tag"),
+                span: Span::from(0..8)
+            }])
         );
         assert_eq!(
             lexer().parse("#12").into_result(),
-            Ok(vec![(Token::Tag("12"), Span::from(0..3))])
+            Ok(vec![Spanned {
+                node: Token::Tag("12"),
+                span: Span::from(0..3)
+            }])
         );
     }
 
@@ -272,7 +321,7 @@ mod tests {
             .parse(
                 tokens
                     .as_slice()
-                    .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+                    .map((src.len()..src.len()).into(), |t| (&t.node, &t.span)),
             )
             .unwrap();
         assert_eq!(res.len(), 1);
@@ -281,22 +330,27 @@ mod tests {
             vec![
                 EdgeStart {
                     coord: Coord::Absolute(0, 0, Some("p0")),
-                    attributes: HashMap::default()
+                    start: 8,
+                    attributes: HashMap::default(),
                 },
                 EdgeStart {
                     coord: Coord::Relative(0, 5, None),
+                    start: 17,
                     attributes: HashMap::default()
                 },
                 EdgeStart {
                     coord: Coord::Relative(5, 5, None),
+                    start: 21,
                     attributes: HashMap::default()
                 },
                 EdgeStart {
                     coord: Coord::Relative(5, 0, None),
+                    start: 25,
                     attributes: HashMap::default()
                 },
                 EdgeStart {
                     coord: Coord::Reference("p0"),
+                    start: 29,
                     attributes: HashMap::default()
                 },
             ]

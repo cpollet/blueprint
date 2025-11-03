@@ -52,6 +52,12 @@ fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
     let src = fs::read_to_string(path).expect("Failed to read file");
     let shapes = parser::parse(src.as_str(), path);
 
+    let newline_offsets = src
+        .chars()
+        .enumerate()
+        .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
+        .collect::<Vec<usize>>();
+
     let mut blueprint = Blueprint::default();
     let mut points = HashMap::new();
 
@@ -63,11 +69,23 @@ fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
         let mut nodes: Vec<Point> = Vec::with_capacity(edge_starts.len());
         let mut edges = Vec::with_capacity(edge_starts.len() - 1);
 
-        for ((from, attr), to) in edge_starts
+        for ((from, attr, span_start), to) in edge_starts
             .iter()
-            .map(|i| (&i.coord, &i.attributes))
+            .map(|i| (&i.coord, &i.attributes, i.start))
             .zip(edge_starts.iter().skip(1).map(|i| &i.coord))
         {
+            let line = newline_offsets
+                .iter()
+                .enumerate()
+                .filter_map(
+                    |(i, offset)| {
+                        if *offset > span_start { Some(i) } else { None }
+                    },
+                )
+                .next()
+                .unwrap_or_default()
+                + 1;
+
             let (from, tag) = match from {
                 Coord::Absolute(x, y, tag) => (Point::new(*x as f32, *y as f32), *tag),
                 Coord::Relative(x, y, tag) => (
@@ -118,7 +136,7 @@ fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
                 .map(|c| c.unwrap_or_default())
                 .unwrap_or_default();
 
-            edges.push(Edge::new_from_points(from, to, color));
+            edges.push(Edge::new_from_points(from, to, color, line));
         }
 
         blueprint.push(Shape::from(edges))

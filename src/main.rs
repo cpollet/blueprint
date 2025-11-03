@@ -199,10 +199,9 @@ fn handle_fs_event(event: notify::Event) -> Option<AppEvent> {
         notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
         | notify::EventKind::Access(notify::event::AccessKind::Close(
             notify::event::AccessMode::Write,
-        )) => {
-            let blueprint = load_blueprint(&event.paths[0]).unwrap();
-            Some(AppEvent::BlueprintUpdated(blueprint))
-        }
+        )) => load_blueprint(&event.paths[0])
+            .ok()
+            .map(AppEvent::BlueprintUpdated),
         _ => None,
     }
 }

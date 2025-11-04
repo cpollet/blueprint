@@ -5,7 +5,7 @@ mod ppm;
 mod ui;
 
 use crate::domain::{Blueprint, Bound, Color, Draw, Edge, Point, Shape};
-use crate::parser::Coord;
+use crate::parser::{CommandKind, Coord};
 use crate::ppm::PpmImage;
 use crate::ui::{AppEvent, Command};
 use futures::SinkExt;
@@ -62,84 +62,83 @@ fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
     let mut blueprint = Blueprint::default();
     let mut points = HashMap::new();
 
-    for edge_starts in shapes {
-        if edge_starts.is_empty() {
+    for commands in shapes {
+        if commands.is_empty() {
             continue;
         }
 
-        let mut nodes: Vec<Point> = Vec::with_capacity(edge_starts.len());
-        let mut edges = Vec::with_capacity(edge_starts.len() - 1);
+        let mut nodes: Vec<Point> = Vec::with_capacity(commands.len());
+        let mut edges = Vec::with_capacity(commands.len() - 1);
 
-        for ((from, attr, span_start), to) in edge_starts
-            .iter()
-            .map(|i| (&i.coord, &i.attributes, i.start))
-            .zip(edge_starts.iter().skip(1).map(|i| &i.coord))
-        {
-            let line = newline_offsets
-                .iter()
-                .enumerate()
-                .filter_map(
-                    |(i, offset)| {
-                        if *offset > span_start { Some(i) } else { None }
-                    },
-                )
-                .next()
-                .unwrap_or_default()
-                + 1;
-
-            let (from, tag) = match from {
-                Coord::Absolute(x, y, tag) => (Point::new(*x as f32, *y as f32), *tag),
-                Coord::Relative(x, y, tag) => (
-                    nodes
-                        .last()
-                        .copied()
-                        .map(|last| last.add(*x as f32, *y as f32))
-                        .unwrap_or(Point::new(*y as f32, *x as f32)),
-                    *tag,
-                ),
-                Coord::Reference(tag) => (
-                    match points.get(*tag) {
+        for command in commands.into_iter() {
+            let (draw, to, tag) = match command.kind {
+                CommandKind::Move(Coord::Absolute(x, y, tag)) => {
+                    let to = Point::new(x as f32, y as f32);
+                    (None, to, tag)
+                }
+                CommandKind::Move(Coord::Relative(dx, dy, tag)) => {
+                    let from = nodes.last().cloned().unwrap_or_default();
+                    let to = from.add(dx as f32, dy as f32);
+                    (None, to, tag)
+                }
+                CommandKind::Move(Coord::Reference(tag)) => {
+                    let to = match points.get(tag) {
                         None => {
                             eprintln!("#{tag} not found",);
                             return Err(());
                         }
                         Some(p) => *p,
-                    },
-                    None,
-                ),
+                    };
+                    (None, to, None)
+                }
+                CommandKind::Draw(Coord::Absolute(x, y, tag), color) => {
+                    let from = nodes.last().cloned().unwrap_or_default();
+                    let to = Point::new(x as f32, y as f32);
+                    (Some((from, color)), to, tag)
+                }
+                CommandKind::Draw(Coord::Relative(dx, dy, tag), color) => {
+                    let from = nodes.last().cloned().unwrap_or_default();
+                    let to = from.add(dx as f32, dy as f32);
+                    (Some((from, color)), to, tag)
+                }
+                CommandKind::Draw(Coord::Reference(tag), color) => {
+                    let from = nodes.last().cloned().unwrap_or_default();
+                    let to = match points.get(tag) {
+                        None => {
+                            eprintln!("#{tag} not found",);
+                            return Err(());
+                        }
+                        Some(p) => *p,
+                    };
+                    (Some((from, color)), to, None)
+                }
             };
-            nodes.push(from);
-            if let Some(tag) = tag {
-                // println!("{} at {:?}", tag, from);
-                points.insert(tag, from);
+
+            if let Some((from, color)) = draw {
+                let line = newline_offsets
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, offset)| {
+                        if *offset > command.src_index {
+                            Some(i)
+                        } else {
+                            None
+                        }
+                    })
+                    .next()
+                    .unwrap_or_default()
+                    + 1;
+
+                let edge = Edge::new_from_points(from, to, color, line);
+                edges.push(edge);
             }
 
-            let to = match to {
-                Coord::Absolute(x, y, _) => Point::new(*x as f32, *y as f32),
-                Coord::Relative(x, y, _) => nodes
-                    .last()
-                    .copied()
-                    .map(|last: Point| last.add(*x as f32, *y as f32))
-                    .unwrap_or(Point::new(*y as f32, *x as f32)),
+            if let Some(tag) = tag {
+                points.insert(tag, to);
+            }
 
-                Coord::Reference(tag) => match points.get(tag) {
-                    None => {
-                        eprintln!("#{tag} not found",);
-                        return Err(());
-                    }
-                    Some(p) => *p,
-                },
-            };
-
-            let color = attr
-                .get("color")
-                .map(|s| Color::try_from(*s))
-                .map(|c| c.unwrap_or_default())
-                .unwrap_or_default();
-
-            edges.push(Edge::new_from_points(from, to, color, line));
+            nodes.push(to);
         }
-
         blueprint.push(Shape::from(edges))
     }
 

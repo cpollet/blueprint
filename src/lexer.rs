@@ -13,7 +13,7 @@ pub struct Spanned<T: Clone + Debug + PartialEq> {
 pub enum Token<'src> {
     Num(i32),
     Ident(&'src str),
-    Shape,
+    Move,
     Tag(&'src str),
     At,
     Comma,
@@ -29,7 +29,7 @@ impl Display for Token<'_> {
         match self {
             Token::Num(n) => write!(f, "{n}"),
             Token::Ident(ident) => write!(f, "{ident}"),
-            Token::Shape => write!(f, "shape"),
+            Token::Move => write!(f, "move"),
             Token::Tag(ident) => write!(f, "#{ident}"),
             Token::At => write!(f, "@"),
             Token::Comma => write!(f, ","),
@@ -51,7 +51,7 @@ pub fn lexer<'src>()
         .map(|(a, b): (i32, i32)| Token::Num(a * b));
 
     let ident = text::ascii::ident().map(|ident: &str| match ident {
-        "shape" => Token::Shape,
+        "move" => Token::Move,
         _ => Token::Ident(ident),
     });
 
@@ -122,10 +122,10 @@ mod test {
             }])
         );
         assert_eq!(
-            lexer().parse("shape").into_result(),
+            lexer().parse("move").into_result(),
             Ok(vec![Spanned {
-                node: Token::Shape,
-                span: Span::from(0..5)
+                node: Token::Move,
+                span: Span::from(0..4)
             }])
         );
         assert_eq!(
@@ -136,7 +136,7 @@ mod test {
             }])
         );
         assert_eq!(
-            lexer().parse("123 ident shape").into_result(),
+            lexer().parse("123 ident move").into_result(),
             Ok(vec![
                 Spanned {
                     node: Token::Num(123),
@@ -147,8 +147,8 @@ mod test {
                     span: Span::from(4..9)
                 },
                 Spanned {
-                    node: Token::Shape,
-                    span: Span::from(10..15)
+                    node: Token::Move,
+                    span: Span::from(10..14)
                 }
             ])
         );

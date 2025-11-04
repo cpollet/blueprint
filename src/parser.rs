@@ -1,27 +1,32 @@
+use crate::domain::Color;
 use crate::lexer::{Span, Spanned, Token, lexer};
-use ariadne::{Color, Label, Report, ReportKind, sources};
+use ariadne::{Label, Report, ReportKind, sources};
 use chumsky::input::ValueInput;
 use chumsky::prelude::*;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::Path;
 
-#[derive(Clone, Debug, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Coord<'s> {
     Absolute(i32, i32, Option<&'s str>),
     Relative(i32, i32, Option<&'s str>),
     Reference(&'s str),
 }
 
-#[derive(Debug, PartialEq)]
-#[non_exhaustive]
-pub struct EdgeStart<'s> {
-    pub coord: Coord<'s>,
-    pub attributes: HashMap<&'s str, &'s str>,
-    pub start: usize,
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub enum CommandKind<'s> {
+    Move(Coord<'s>),
+    Draw(Coord<'s>, Color),
 }
 
-pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<EdgeStart<'s>>> {
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct Command<'s> {
+    pub kind: CommandKind<'s>,
+    pub src_index: usize,
+}
+
+pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<Command<'s>>> {
     let (tokens, lexer_errors) = lexer().parse(src).into_output_errors();
     let tokens = tokens.unwrap_or_default();
 
@@ -53,12 +58,12 @@ pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<EdgeStart<'s>>> {
                 .with_label(
                     Label::new((filename.display().to_string(), e.span().into_range()))
                         .with_message(e.reason().to_string())
-                        .with_color(Color::Red),
+                        .with_color(ariadne::Color::Red),
                 )
                 .with_labels(e.contexts().map(|(label, span)| {
                     Label::new((filename.display().to_string(), span.into_range()))
                         .with_message(format!("while parsing this {label}"))
-                        .with_color(Color::Yellow)
+                        .with_color(ariadne::Color::Yellow)
                 }))
                 .finish()
                 .print(sources([(filename.display().to_string(), src)]))
@@ -70,8 +75,93 @@ pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<EdgeStart<'s>>> {
 }
 
 fn parser<'tokens, 'src: 'tokens, I>()
--> impl Parser<'tokens, I, Vec<Vec<EdgeStart<'src>>>, extra::Err<Rich<'tokens, Token<'src>, Span>>>
-+ Clone
+-> impl Parser<'tokens, I, Vec<Vec<Command<'src>>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
+where
+    I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
+{
+    let move_command = just(Token::Move)
+        .ignore_then(coord())
+        .map_with(|coord, e| Command {
+            kind: CommandKind::Move(coord.node),
+            src_index: (e.span() as Span).start,
+        });
+
+    let draw_command =
+        edge_attributes()
+            .or_not()
+            .then(coord())
+            .validate(|(attrs, coord), extra, emitter| {
+                let mut attrs = attrs.unwrap_or_default();
+
+                let color = match attrs.remove("color") {
+                    None => Color::default(),
+                    Some(color) => match Color::try_from(color.node) {
+                        Ok(color) => color,
+                        Err(_) => {
+                            emitter.emit(Rich::custom(
+                                color.span,
+                                format!("`{color}` is not a known color.", color = color.node),
+                            ));
+                            Color::default()
+                        }
+                    },
+                };
+
+                Command {
+                    kind: CommandKind::Draw(coord.node, color),
+                    src_index: coord.span.start,
+                }
+            });
+
+    let command = choice((move_command, draw_command));
+
+    // { command, ... }
+    let commands = command
+        .repeated()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::OpenCurly), just(Token::CloseCurly));
+
+    // { command, ... } ...
+    commands.repeated().collect::<Vec<_>>()
+}
+
+/// Parses a potentially empty list of key/value pairs of the following form:
+/// `[ key : value , ... ]`. A training comma is allowed.
+fn edge_attributes<'tokens, 'src: 'tokens, I>() -> impl Parser<
+    'tokens,
+    I,
+    HashMap<&'src str, Spanned<&'src str>>,
+    extra::Err<Rich<'tokens, Token<'src>, Span>>,
+> + Clone
+where
+    I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
+{
+    let ident = select! {
+        Token::Ident(t) => t,
+    }
+    .labelled("ident");
+
+    let edge_attr = ident
+        .then_ignore(just(Token::Colon))
+        .then(ident.map_with(|i, e| Spanned {
+            node: i,
+            span: e.span(),
+        }));
+
+    let edge_attrs = edge_attr
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect::<HashMap<_, _>>();
+
+    edge_attrs.delimited_by(just(Token::OpenSquare), just(Token::CloseSquare))
+}
+
+/// Parses any of the following:
+///  * `x,y` optionally followed by `#tag` into `Coord::Relative(x, y, "tag")`
+///  * `@x,y` optionally followed by `#tag` into `Coord::Absolute(x, y, "tag")`
+///  * `@#tag` into `Coord::Reference("tag")`
+fn coord<'tokens, 'src: 'tokens, I>()
+-> impl Parser<'tokens, I, Spanned<Coord<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
 where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
@@ -79,16 +169,10 @@ where
         Token::Num(n) => n,
     }
     .labelled("number");
-
     let tag = select! {
         Token::Tag(t) => t,
     }
     .labelled("tag");
-
-    let ident = select! {
-        Token::Ident(t) => t,
-    }
-    .labelled("ident");
 
     let num_pair = num.then_ignore(just(Token::Comma)).then(num);
     let coord_rel = num_pair
@@ -100,31 +184,11 @@ where
         .then(tag.or_not())
         .map(|((x, y), t)| Coord::Absolute(x, y, t));
     let coord_ref = just(Token::At).ignore_then(tag).map(Coord::Reference);
-    let coord = choice((coord_rel, coord_abs, coord_ref)).map_with(|c, e| Spanned {
+
+    choice((coord_rel, coord_abs, coord_ref)).map_with(|c, e| Spanned {
         node: c,
         span: e.span(),
-    });
-
-    let edge_attr = ident.then_ignore(just(Token::Colon)).then(ident);
-    let edge_attr_list = edge_attr
-        .separated_by(just(Token::Comma))
-        .allow_trailing()
-        .collect::<HashMap<_, _>>();
-    let edge_attrs = edge_attr_list.delimited_by(just(Token::OpenSquare), just(Token::CloseSquare));
-
-    let node = coord
-        .then(edge_attrs.or_not())
-        .map(|(t, attributes)| EdgeStart {
-            coord: t.node,
-            start: t.span.start,
-            attributes: attributes.unwrap_or_default(),
-        });
-    let nodes = node.repeated().collect::<Vec<_>>();
-
-    just(Token::Shape)
-        .ignore_then(nodes.delimited_by(just(Token::OpenCurly), just(Token::CloseCurly)))
-        .repeated()
-        .collect::<Vec<Vec<_>>>()
+    })
 }
 
 #[cfg(test)]
@@ -133,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_parser() {
-        let src = "shape { @0,0 #p0 0,5 5,5 5,0 @#p0 }";
+        let src = "{ move @0,0 #p0 0,5 5,5 5,0 [color:blue] @#p0 }";
         let tokens = lexer().parse(src).unwrap();
         let res = parser()
             .parse(
@@ -142,34 +206,28 @@ mod tests {
                     .map((src.len()..src.len()).into(), |t| (&t.node, &t.span)),
             )
             .unwrap();
-        assert_eq!(res.len(), 1);
         assert_eq!(
             res[0],
             vec![
-                EdgeStart {
-                    coord: Coord::Absolute(0, 0, Some("p0")),
-                    start: 8,
-                    attributes: HashMap::default(),
+                Command {
+                    kind: CommandKind::Move(Coord::Absolute(0, 0, Some("p0"))),
+                    src_index: 2,
                 },
-                EdgeStart {
-                    coord: Coord::Relative(0, 5, None),
-                    start: 17,
-                    attributes: HashMap::default()
+                Command {
+                    kind: CommandKind::Draw(Coord::Relative(0, 5, None), Color::Black),
+                    src_index: 16,
                 },
-                EdgeStart {
-                    coord: Coord::Relative(5, 5, None),
-                    start: 21,
-                    attributes: HashMap::default()
+                Command {
+                    kind: CommandKind::Draw(Coord::Relative(5, 5, None), Color::Black),
+                    src_index: 20,
                 },
-                EdgeStart {
-                    coord: Coord::Relative(5, 0, None),
-                    start: 25,
-                    attributes: HashMap::default()
+                Command {
+                    kind: CommandKind::Draw(Coord::Relative(5, 0, None), Color::Black),
+                    src_index: 24,
                 },
-                EdgeStart {
-                    coord: Coord::Reference("p0"),
-                    start: 29,
-                    attributes: HashMap::default()
+                Command {
+                    kind: CommandKind::Draw(Coord::Reference("p0"), Color::Blue),
+                    src_index: 41,
                 },
             ]
         );

@@ -1,4 +1,5 @@
 mod domain;
+mod lexer;
 mod parser;
 mod ppm;
 mod ui;

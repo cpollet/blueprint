@@ -16,6 +16,7 @@ pub enum Coord<'s> {
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum CommandKind<'s> {
+    Nested(Vec<Command<'s>>),
     Move(Coord<'s>),
     Draw(Coord<'s>, Color),
 }
@@ -26,7 +27,7 @@ pub struct Command<'s> {
     pub src_index: usize,
 }
 
-pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<Command<'s>>> {
+pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Command<'s>> {
     let (tokens, lexer_errors) = lexer().parse(src).into_output_errors();
     let tokens = tokens.unwrap_or_default();
 
@@ -75,54 +76,70 @@ pub fn parse<'s>(src: &'s str, filename: &Path) -> Vec<Vec<Command<'s>>> {
 }
 
 fn parser<'tokens, 'src: 'tokens, I>()
--> impl Parser<'tokens, I, Vec<Vec<Command<'src>>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
+-> impl Parser<'tokens, I, Vec<Command<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
 where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
-    let move_command = just(Token::Move)
+    // { command { command .... } ... }
+    recursive(|commands| {
+        choice((
+            move_command(),
+            draw_command(),
+            commands
+                .delimited_by(just(Token::OpenCurly), just(Token::CloseCurly))
+                .map_with(|c, e| Command {
+                    kind: CommandKind::Nested(c),
+                    src_index: (e.span() as Span).start,
+                }),
+        ))
+        .repeated()
+        .collect::<Vec<_>>()
+    })
+}
+
+fn move_command<'tokens, 'src: 'tokens, I>()
+-> impl Parser<'tokens, I, Command<'src>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
+where
+    I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
+{
+    just(Token::Move)
         .ignore_then(coord())
         .map_with(|coord, e| Command {
             kind: CommandKind::Move(coord.node),
             src_index: (e.span() as Span).start,
-        });
+        })
+}
 
-    let draw_command =
-        edge_attributes()
-            .or_not()
-            .then(coord())
-            .validate(|(attrs, coord), extra, emitter| {
-                let mut attrs = attrs.unwrap_or_default();
+fn draw_command<'tokens, 'src: 'tokens, I>()
+-> impl Parser<'tokens, I, Command<'src>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
+where
+    I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
+{
+    edge_attributes()
+        .or_not()
+        .then(coord())
+        .validate(|(attrs, coord), _extra, emitter| {
+            let mut attrs = attrs.unwrap_or_default();
 
-                let color = match attrs.remove("color") {
-                    None => Color::default(),
-                    Some(color) => match Color::try_from(color.node) {
-                        Ok(color) => color,
-                        Err(_) => {
-                            emitter.emit(Rich::custom(
-                                color.span,
-                                format!("`{color}` is not a known color.", color = color.node),
-                            ));
-                            Color::default()
-                        }
-                    },
-                };
+            let color = match attrs.remove("color") {
+                None => Color::default(),
+                Some(color) => match Color::try_from(color.node) {
+                    Ok(color) => color,
+                    Err(_) => {
+                        emitter.emit(Rich::custom(
+                            color.span,
+                            format!("`{color}` is not a known color.", color = color.node),
+                        ));
+                        Color::default()
+                    }
+                },
+            };
 
-                Command {
-                    kind: CommandKind::Draw(coord.node, color),
-                    src_index: coord.span.start,
-                }
-            });
-
-    let command = choice((move_command, draw_command));
-
-    // { command, ... }
-    let commands = command
-        .repeated()
-        .collect::<Vec<_>>()
-        .delimited_by(just(Token::OpenCurly), just(Token::CloseCurly));
-
-    // { command, ... } ...
-    commands.repeated().collect::<Vec<_>>()
+            Command {
+                kind: CommandKind::Draw(coord.node, color),
+                src_index: coord.span.start,
+            }
+        })
 }
 
 /// Parses a potentially empty list of key/value pairs of the following form:
@@ -207,29 +224,32 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            res[0],
-            vec![
-                Command {
-                    kind: CommandKind::Move(Coord::Absolute(0, 0, Some("p0"))),
-                    src_index: 2,
-                },
-                Command {
-                    kind: CommandKind::Draw(Coord::Relative(0, 5, None), Color::Black),
-                    src_index: 16,
-                },
-                Command {
-                    kind: CommandKind::Draw(Coord::Relative(5, 5, None), Color::Black),
-                    src_index: 20,
-                },
-                Command {
-                    kind: CommandKind::Draw(Coord::Relative(5, 0, None), Color::Black),
-                    src_index: 24,
-                },
-                Command {
-                    kind: CommandKind::Draw(Coord::Reference("p0"), Color::Blue),
-                    src_index: 41,
-                },
-            ]
+            res,
+            vec![Command {
+                kind: CommandKind::Nested(vec![
+                    Command {
+                        kind: CommandKind::Move(Coord::Absolute(0, 0, Some("p0"))),
+                        src_index: 2,
+                    },
+                    Command {
+                        kind: CommandKind::Draw(Coord::Relative(0, 5, None), Color::Black),
+                        src_index: 16,
+                    },
+                    Command {
+                        kind: CommandKind::Draw(Coord::Relative(5, 5, None), Color::Black),
+                        src_index: 20,
+                    },
+                    Command {
+                        kind: CommandKind::Draw(Coord::Relative(5, 0, None), Color::Black),
+                        src_index: 24,
+                    },
+                    Command {
+                        kind: CommandKind::Draw(Coord::Reference("p0"), Color::Blue),
+                        src_index: 41,
+                    },
+                ]),
+                src_index: 0,
+            }]
         );
     }
 }

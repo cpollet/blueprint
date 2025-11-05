@@ -48,41 +48,59 @@ fn main() {
     ui::show(PathBuf::from(in_filename), Blueprint::default()).expect("can launch UI");
 }
 
-// todo return a String as error and display it on the UI
-fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
-    let src = fs::read_to_string(path).expect("Failed to read file");
-    let shapes = parser::parse(src.as_str(), path);
+struct BlueprintLoader<'s> {
+    points: HashMap<&'s str, Point>,
+    last_point: Option<Point>,
+    stack: Vec<Point>,
+    blueprint: Blueprint,
+}
 
-    let newline_offsets = src
-        .chars()
-        .enumerate()
-        .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
-        .collect::<Vec<usize>>();
-
-    let mut blueprint = Blueprint::default();
-    let mut points = HashMap::new();
-
-    for commands in shapes {
-        if commands.is_empty() {
-            continue;
+impl<'s> BlueprintLoader<'s> {
+    pub fn new() -> Self {
+        Self {
+            last_point: Default::default(),
+            points: Default::default(),
+            stack: Default::default(),
+            blueprint: Default::default(),
         }
+    }
 
-        let mut nodes: Vec<Point> = Vec::with_capacity(commands.len());
+    pub fn exec(
+        mut self,
+        commands: &'s [parser::Command],
+        lines: &[usize],
+    ) -> Result<Blueprint, ()> {
+        // self.nodes.reserve(commands.len());
+
+        self.exec_block(commands, lines)?;
+
+        self.blueprint.translate_to_origin();
+        Ok(self.blueprint)
+    }
+
+    fn exec_block(
+        &mut self,
+        commands: &'s [parser::Command],
+        newline_offsets: &[usize],
+    ) -> Result<(), ()> {
+        if commands.is_empty() {
+            return Ok(());
+        }
         let mut edges = Vec::with_capacity(commands.len() - 1);
 
-        for command in commands.into_iter() {
-            let (draw, to, tag) = match command.kind {
+        for command in commands {
+            let (draw, to, tag) = match &command.kind {
                 CommandKind::Move(Coord::Absolute(x, y, tag)) => {
-                    let to = Point::new(x as f32, y as f32);
-                    (None, to, tag)
+                    let to = Point::new(*x as f32, *y as f32);
+                    (None, to, *tag)
                 }
                 CommandKind::Move(Coord::Relative(dx, dy, tag)) => {
-                    let from = nodes.last().cloned().unwrap_or_default();
-                    let to = from.add(dx as f32, dy as f32);
-                    (None, to, tag)
+                    let from = self.last_point.unwrap_or_default();
+                    let to = from.add(*dx as f32, *dy as f32);
+                    (None, to, *tag)
                 }
                 CommandKind::Move(Coord::Reference(tag)) => {
-                    let to = match points.get(tag) {
+                    let to = match self.points.get(*tag) {
                         None => {
                             eprintln!("#{tag} not found",);
                             return Err(());
@@ -92,18 +110,18 @@ fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
                     (None, to, None)
                 }
                 CommandKind::Draw(Coord::Absolute(x, y, tag), color) => {
-                    let from = nodes.last().cloned().unwrap_or_default();
-                    let to = Point::new(x as f32, y as f32);
-                    (Some((from, color)), to, tag)
+                    let from = self.last_point.unwrap_or_default();
+                    let to = Point::new(*x as f32, *y as f32);
+                    (Some((from, color)), to, *tag)
                 }
                 CommandKind::Draw(Coord::Relative(dx, dy, tag), color) => {
-                    let from = nodes.last().cloned().unwrap_or_default();
-                    let to = from.add(dx as f32, dy as f32);
-                    (Some((from, color)), to, tag)
+                    let from = self.last_point.unwrap_or_default();
+                    let to = from.add(*dx as f32, *dy as f32);
+                    (Some((from, color)), to, *tag)
                 }
                 CommandKind::Draw(Coord::Reference(tag), color) => {
-                    let from = nodes.last().cloned().unwrap_or_default();
-                    let to = match points.get(tag) {
+                    let from = self.last_point.unwrap_or_default();
+                    let to = match self.points.get(tag) {
                         None => {
                             eprintln!("#{tag} not found",);
                             return Err(());
@@ -111,6 +129,19 @@ fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
                         Some(p) => *p,
                     };
                     (Some((from, color)), to, None)
+                }
+                CommandKind::Nested(commands) => {
+                    if let Some(last_point) = self.last_point {
+                        self.stack.push(last_point)
+                    }
+
+                    self.exec_block(commands, newline_offsets)?;
+
+                    if let Some(last_point) = self.stack.pop() {
+                        self.last_point.replace(last_point);
+                    }
+
+                    continue;
                 }
             };
 
@@ -129,21 +160,36 @@ fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
                     .unwrap_or_default()
                     + 1;
 
-                let edge = Edge::new_from_points(from, to, color, line);
+                let edge = Edge::new_from_points(from, to, *color, line);
                 edges.push(edge);
             }
 
             if let Some(tag) = tag {
-                points.insert(tag, to);
+                self.points.insert(tag, to);
             }
 
-            nodes.push(to);
+            self.last_point.replace(to);
         }
-        blueprint.push(Shape::from(edges))
-    }
 
-    blueprint.translate_to_origin();
-    Ok(blueprint)
+        self.blueprint.push(Shape::from(edges));
+
+        Ok(())
+    }
+}
+
+// todo return a String as error and display it on the UI
+fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
+    let src = fs::read_to_string(path).expect("Failed to read file");
+
+    let newline_offsets = src
+        .chars()
+        .enumerate()
+        .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
+        .collect::<Vec<usize>>();
+
+    let commands = parser::parse(src.as_str(), path);
+
+    BlueprintLoader::new().exec(&commands, &newline_offsets)
 }
 
 pub fn open_and_watch_file() -> impl Stream<Item = AppEvent> {

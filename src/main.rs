@@ -179,7 +179,9 @@ impl<'s> BlueprintLoader<'s> {
 
 // todo return a String as error and display it on the UI
 fn load_blueprint(path: &Path) -> Result<Blueprint, ()> {
-    let src = fs::read_to_string(path).expect("Failed to read file");
+    let src = fs::read_to_string(path).map_err(|e| {
+        eprintln!("Could not open {}: {}", path.display(), e);
+    })?;
 
     let newline_offsets = src
         .chars()
@@ -208,7 +210,7 @@ pub fn open_and_watch_file() -> impl Stream<Item = AppEvent> {
             select! {
                 fs_event = next_fs_event => {
                     if let Some(Ok(fs_event)) = fs_event
-                        && let Some(event) = handle_fs_event(fs_event) {
+                        && let Some(event) = handle_fs_event(fs_event, &watcher) {
                             output.send(event).await.unwrap();
                     }
                 },
@@ -240,14 +242,18 @@ fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Resul
     Ok((watcher, rx))
 }
 
-fn handle_fs_event(event: notify::Event) -> Option<AppEvent> {
+fn handle_fs_event(event: notify::Event, watcher: &FileWatcher) -> Option<AppEvent> {
+    use notify::event::*;
+
+    let path = event
+        .paths
+        .into_iter()
+        .find(|path| watcher.is_watched(path))?;
+
     match &event.kind {
-        notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
-        | notify::EventKind::Access(notify::event::AccessKind::Close(
-            notify::event::AccessMode::Write,
-        )) => load_blueprint(&event.paths[0])
-            .ok()
-            .map(AppEvent::BlueprintUpdated),
+        EventKind::Modify(ModifyKind::Data(data)) => {
+            load_blueprint(&path).ok().map(AppEvent::BlueprintUpdated)
+        }
         _ => None,
     }
 }
@@ -269,13 +275,25 @@ struct FileWatcher {
 
 impl FileWatcher {
     fn watch(&mut self, path: PathBuf) {
-        if let Some(path) = self.path.take() {
-            self.inner.unwatch(&path).unwrap();
+        let path = path.canonicalize().unwrap();
+        let parent_path = path.parent().unwrap().to_path_buf();
+
+        if self.path.is_some() {
+            self.inner.unwatch(&parent_path).unwrap();
         }
+
         self.inner
-            .watch(&path, RecursiveMode::NonRecursive)
+            .watch(&parent_path, RecursiveMode::NonRecursive)
             .unwrap();
+
         self.path = Some(path);
+    }
+
+    fn is_watched(&self, path: &Path) -> bool {
+        match &self.path {
+            None => false,
+            Some(watched_path) => watched_path == path,
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 // Comments are marked with // and expand to end of line
 
-// A shape is inside a `shape { ... }` block. A shape is defined as a list of
+// A shape is inside a `{ ... }` block. A shape is defined as a list of
 // point, each point is connected to the previous one (except for the first one
 // who does not have any previous).
 //
@@ -26,7 +26,7 @@
 
 // The following draws a square with a diagonal from top-right to bottom left
 // corner
-shape {
+{
   @0,0
   [color:blue]
   5,0 #top-right
